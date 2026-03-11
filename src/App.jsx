@@ -14,6 +14,7 @@ const styles = `
     --or: #c9a84c; --or-clair: #e8c97a; --blanc: #f0ede6; --gris: #8a9ab5;
     --vert: #2ecc71; --rouge: #e74c3c; --orange: #f39c12; --bleu: #3498db;
   }
+  html, body, #root { height: 100%; }
   body { font-family: 'DM Sans', sans-serif; background: var(--bleu-nuit); color: var(--blanc); }
   .app { display: flex; min-height: 100vh; }
   .sidebar { width: 240px; min-height: 100vh; background: var(--bleu-profond); border-right: 1px solid var(--bleu-moyen); display: flex; flex-direction: column; position: fixed; top: 0; left: 0; z-index: 100; }
@@ -1341,7 +1342,7 @@ function Login() {
   return (
     <>
       <style>{styles}</style>
-      <div style={{ minHeight: "100vh", background: "var(--bleu-nuit)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ height: "100%", minHeight: "100vh", background: "var(--bleu-nuit)", display: "flex", alignItems: "center", justifyContent: "center" }}>
         <div style={{ background: "var(--bleu-profond)", border: "1px solid var(--bleu-moyen)", borderRadius: 16, padding: "48px 40px", width: 380, boxShadow: "0 20px 60px rgba(0,0,0,0.4)" }}>
           <div style={{ textAlign: "center", marginBottom: 32 }}>
             <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 28, color: "var(--or)", marginBottom: 6 }}>SyndicPro</div>
