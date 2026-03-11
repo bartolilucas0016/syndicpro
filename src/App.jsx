@@ -723,6 +723,99 @@ function Assemblees({ showToast }) {
   );
 }
 
+function Finance() {
+  const [paiements, setPaiements] = useState([]);
+  const [charges, setCharges] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function load() {
+      const [p, c] = await Promise.all([
+        supabase.from("paiements").select("*, coproprietaires(nom, prenom, lot)"),
+        supabase.from("charges").select("*"),
+      ]);
+      setPaiements(p.data || []);
+      setCharges(c.data || []);
+      setLoading(false);
+    }
+    load();
+  }, []);
+
+  if (loading) return <div className="loading">⏳ Chargement...</div>;
+
+  const totalEncaisse = paiements.filter(p => p.statut === "paye").reduce((s, p) => s + p.montant, 0);
+  const totalImpaye = paiements.filter(p => p.statut === "impaye").reduce((s, p) => s + p.montant, 0);
+  const totalAttendu = paiements.reduce((s, p) => s + p.montant, 0);
+  const tauxRecouvrement = totalAttendu > 0 ? Math.round((totalEncaisse / totalAttendu) * 100) : 0;
+
+  const parCopro = {};
+  paiements.forEach(p => {
+    const key = p.coproprietaire_id;
+    if (!parCopro[key]) parCopro[key] = { nom: p.coproprietaires ? `${p.coproprietaires.prenom} ${p.coproprietaires.nom}` : "—", lot: p.coproprietaires?.lot, paye: 0, impaye: 0 };
+    if (p.statut === "paye") parCopro[key].paye += p.montant;
+    else if (p.statut === "impaye") parCopro[key].impaye += p.montant;
+  });
+
+  const now = new Date();
+  const mois = [];
+  for (let i = 11; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    mois.push({ key, label: d.toLocaleDateString("fr-FR", { month: "short" }), montant: 0 });
+  }
+  paiements.filter(p => p.statut === "paye" && p.date_paiement).forEach(p => {
+    const key = p.date_paiement.substring(0, 7);
+    const m = mois.find(m => m.key === key);
+    if (m) m.montant += p.montant;
+  });
+  const maxMontant = Math.max(...mois.map(m => m.montant), 1);
+
+  return (
+    <div>
+      <div className="topbar"><div><div className="page-title">📊 Tableau de bord financier</div><div className="page-sub">Analyse de la trésorerie</div></div></div>
+      <div className="stats-grid">
+        <div className="stat-card"><div className="stat-label">💰 Total encaissé</div><div className="stat-value" style={{ color: "var(--vert)" }}>{totalEncaisse.toFixed(0)} €</div><div className="stat-sub">paiements confirmés</div></div>
+        <div className="stat-card"><div className="stat-label">⚠️ Total impayé</div><div className="stat-value" style={{ color: "var(--rouge)" }}>{totalImpaye.toFixed(0)} €</div><div className="stat-sub">en retard</div></div>
+        <div className="stat-card"><div className="stat-label">📈 Taux de recouvrement</div><div className="stat-value" style={{ color: tauxRecouvrement >= 80 ? "var(--vert)" : tauxRecouvrement >= 50 ? "var(--orange)" : "var(--rouge)" }}>{tauxRecouvrement}%</div><div className="stat-sub">des charges collectées</div></div>
+        <div className="stat-card"><div className="stat-label">📋 Appels de fonds</div><div className="stat-value" style={{ color: "var(--or-clair)" }}>{charges.length}</div><div className="stat-sub">charges enregistrées</div></div>
+      </div>
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="card-header"><span className="card-title">📅 Encaissements — 12 derniers mois</span></div>
+        <div style={{ display: "flex", alignItems: "flex-end", gap: 8, height: 140, padding: "8px 0 0" }}>
+          {mois.map(m => (
+            <div key={m.key} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+              <div style={{ fontSize: 10, color: "var(--or-clair)", fontWeight: 600, minHeight: 14 }}>{m.montant > 0 ? m.montant + "€" : ""}</div>
+              <div style={{ width: "100%", background: m.montant > 0 ? "var(--or)" : "var(--bleu-moyen)", borderRadius: "4px 4px 0 0", height: `${Math.max((m.montant / maxMontant) * 80, 4)}px`, transition: "height 0.3s" }} />
+              <div style={{ fontSize: 10, color: "var(--gris)" }}>{m.label}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="card">
+        <div className="card-header"><span className="card-title">👥 Solde par copropriétaire</span></div>
+        {Object.values(parCopro).length === 0 ? (
+          <div className="empty"><div className="empty-icon">💳</div><div className="empty-text">Aucun paiement enregistré</div></div>
+        ) : (
+          <div className="table-wrap"><table>
+            <thead><tr><th>Copropriétaire</th><th>Lot</th><th>Payé</th><th>Impayé</th><th>Statut</th></tr></thead>
+            <tbody>
+              {Object.values(parCopro).sort((a, b) => b.impaye - a.impaye).map((c, i) => (
+                <tr key={i}>
+                  <td><strong>{c.nom}</strong></td>
+                  <td style={{ color: "var(--or-clair)" }}>{c.lot || "—"}</td>
+                  <td style={{ color: "var(--vert)", fontWeight: 600 }}>{c.paye} €</td>
+                  <td style={{ color: c.impaye > 0 ? "var(--rouge)" : "var(--gris)", fontWeight: 600 }}>{c.impaye} €</td>
+                  <td><span className={`badge ${c.impaye === 0 ? "badge-green" : "badge-red"}`}>{c.impaye === 0 ? "✓ À jour" : `${c.impaye} € dû`}</span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table></div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [page, setPage] = useState("dashboard");
   const [toast, setToast] = useState(null);
@@ -734,6 +827,7 @@ export default function App() {
     charges: <Charges showToast={showToast} />,
     travaux: <Travaux showToast={showToast} />,
     assemblees: <Assemblees showToast={showToast} />,
+    finance: <Finance />,
   };
 
   const nav = [
@@ -743,6 +837,7 @@ export default function App() {
     { id: "charges", icon: "💰", label: "Charges & Paiements" },
     { id: "travaux", icon: "🔧", label: "Travaux" },
     { id: "assemblees", icon: "📋", label: "Assemblées Générales" },
+    { id: "finance", icon: "📊", label: "Finance" },
   ];
 
   return (
