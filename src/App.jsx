@@ -116,6 +116,7 @@ function Badge({ statut }) {
     termine: ["badge-green", "Terminé"], planifiee: ["badge-blue", "Planifiée"],
     tenue: ["badge-green", "Tenue"], ordinaire: ["badge-gray", "Ordinaire"],
     extraordinaire: ["badge-orange", "Extraordinaire"],
+    ouvert: ["badge-red", "Ouvert"], resolu: ["badge-green", "Résolu"],
   };
   const [cls, label] = map[statut] || ["badge-gray", statut];
   return <span className={`badge ${cls}`}>{label}</span>;
@@ -981,6 +982,165 @@ function Finance() {
   );
 }
 
+function Incidents({ showToast }) {
+  const [data, setData] = useState([]);
+  const [residences, setResidences] = useState([]);
+  const [historique, setHistorique] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [modal, setModal] = useState(false);
+  const [modalDetail, setModalDetail] = useState(null);
+  const emptyForm = { titre: "", description: "", residence_id: "" };
+  const [form, setForm] = useState(emptyForm);
+  const [detailForm, setDetailForm] = useState({ statut: "", commentaire: "" });
+
+  async function load() {
+    const [inc, res] = await Promise.all([
+      supabase.from("incidents").select("*, residences(nom)").order("created_at", { ascending: false }),
+      supabase.from("residences").select("*"),
+    ]);
+    setData(inc.data || []);
+    setResidences(res.data || []);
+    setLoading(false);
+  }
+  useEffect(() => { load(); }, []);
+
+  async function openDetail(inc) {
+    setModalDetail(inc);
+    setDetailForm({ statut: inc.statut, commentaire: "" });
+    const { data: hist } = await supabase.from("incidents_historique").select("*").eq("incident_id", inc.id).order("created_at", { ascending: false });
+    setHistorique(hist || []);
+  }
+
+  async function save() {
+    if (!form.titre) return showToast("Le titre est obligatoire", "error");
+    const { error } = await supabase.from("incidents").insert([form]);
+    if (error) return showToast("Erreur : " + error.message, "error");
+    showToast("Incident signalé ✓", "success");
+    setModal(false); setForm(emptyForm); load();
+  }
+
+  async function updateStatut() {
+    if (!detailForm.commentaire.trim()) return showToast("Le commentaire est obligatoire", "error");
+    const ancienStatut = modalDetail.statut;
+    const payload = { statut: detailForm.statut, updated_at: new Date().toISOString(), ...(detailForm.statut === "resolu" ? { resolu_at: new Date().toISOString() } : {}) };
+    const { error } = await supabase.from("incidents").update(payload).eq("id", modalDetail.id);
+    if (error) return showToast("Erreur : " + error.message, "error");
+    await supabase.from("incidents_historique").insert([{ incident_id: modalDetail.id, ancien_statut: ancienStatut, nouveau_statut: detailForm.statut, commentaire: detailForm.commentaire }]);
+    showToast("Statut mis à jour ✓", "success");
+    setModalDetail(null); load();
+  }
+
+  function tempsRelatif(date) {
+    const diff = Math.floor((Date.now() - new Date(date)) / 1000);
+    if (diff < 60) return "à l'instant";
+    if (diff < 3600) return `il y a ${Math.floor(diff / 60)} min`;
+    if (diff < 86400) return `il y a ${Math.floor(diff / 3600)}h`;
+    const jours = Math.floor(diff / 86400);
+    if (jours < 30) return `il y a ${jours} jour${jours > 1 ? "s" : ""}`;
+    return new Date(date).toLocaleDateString("fr-FR");
+  }
+
+  if (loading) return <div className="loading">⏳ Chargement...</div>;
+
+  const ouverts = data.filter(i => i.statut === "ouvert");
+  const enCours = data.filter(i => i.statut === "en_cours");
+  const debutMois = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+  const resolus = data.filter(i => i.statut === "resolu" && i.resolu_at && new Date(i.resolu_at) >= debutMois);
+  const resolusAll = data.filter(i => i.statut === "resolu");
+
+  const statutBadge = { ouvert: "badge-red", en_cours: "badge-orange", resolu: "badge-green" };
+  const statutLabel = { ouvert: "Ouvert", en_cours: "En cours", resolu: "Résolu" };
+  const groupes = [
+    { statut: "ouvert", items: ouverts },
+    { statut: "en_cours", items: enCours },
+    { statut: "resolu", items: resolusAll },
+  ];
+
+  return (
+    <div>
+      <div className="topbar">
+        <div><div className="page-title">🔧 Incidents</div><div className="page-sub">{data.length} incident(s) enregistré(s)</div></div>
+        <button className="btn btn-primary" onClick={() => setModal(true)}>+ Signaler un incident</button>
+      </div>
+      <div className="grid-3" style={{ marginBottom: 20 }}>
+        <div className="stat-card"><div className="stat-label">🔴 Ouverts</div><div className="stat-value" style={{ color: "var(--rouge)" }}>{ouverts.length}</div><div className="stat-sub">à traiter</div></div>
+        <div className="stat-card"><div className="stat-label">🟠 En cours</div><div className="stat-value" style={{ color: "var(--orange)" }}>{enCours.length}</div><div className="stat-sub">en traitement</div></div>
+        <div className="stat-card"><div className="stat-label">✅ Résolus ce mois</div><div className="stat-value" style={{ color: "var(--vert)" }}>{resolus.length}</div><div className="stat-sub">ce mois-ci</div></div>
+      </div>
+      {data.length === 0 && <div className="card"><div className="empty"><div className="empty-icon">✅</div><div className="empty-text">Aucun incident enregistré</div></div></div>}
+      {groupes.map(({ statut, items }) => items.length === 0 ? null : (
+        <div key={statut} className="card" style={{ marginBottom: 16 }}>
+          <div className="card-header"><span className="card-title"><Badge statut={statut} /></span><span style={{ color: "var(--gris)", fontSize: 12 }}>{items.length}</span></div>
+          {items.map(inc => (
+            <div key={inc.id} className="list-item">
+              <div className="list-icon">{statut === "ouvert" ? "🔴" : statut === "en_cours" ? "🟠" : "✅"}</div>
+              <div className="list-content">
+                <div className="list-title">{inc.titre}</div>
+                <div className="list-sub">
+                  {inc.residences?.nom || "—"} · {tempsRelatif(inc.created_at)}
+                  {inc.description && <span style={{ display: "block", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 320 }}>{inc.description}</span>}
+                </div>
+              </div>
+              <button className="btn btn-secondary btn-sm" onClick={() => openDetail(inc)}>Voir</button>
+            </div>
+          ))}
+        </div>
+      ))}
+      {modal && <Modal title="🔧 Signaler un incident" onClose={() => { setModal(false); setForm(emptyForm); }}>
+        <div className="form-group"><label className="form-label">Titre *</label><input className="form-input" value={form.titre} onChange={e => setForm({ ...form, titre: e.target.value })} /></div>
+        <div className="form-group"><label className="form-label">Description</label><textarea className="form-input" rows={3} value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} /></div>
+        <div className="form-group"><label className="form-label">Résidence</label>
+          <select className="form-input" value={form.residence_id} onChange={e => setForm({ ...form, residence_id: e.target.value })}>
+            <option value="">Sélectionner...</option>
+            {residences.map(r => <option key={r.id} value={r.id}>{r.nom}</option>)}
+          </select>
+        </div>
+        <div className="modal-actions"><button className="btn btn-secondary" onClick={() => { setModal(false); setForm(emptyForm); }}>Annuler</button><button className="btn btn-primary" onClick={save}>✅ Enregistrer</button></div>
+      </Modal>}
+      {modalDetail && <Modal title={`🔧 ${modalDetail.titre}`} onClose={() => setModalDetail(null)}>
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 13, color: "var(--gris)", marginBottom: 8 }}>{modalDetail.residences?.nom || "—"} · {tempsRelatif(modalDetail.created_at)} · <Badge statut={modalDetail.statut} /></div>
+          {modalDetail.description && <div style={{ fontSize: 13, background: "var(--bleu-nuit)", padding: "10px 14px", borderRadius: 8, lineHeight: 1.6 }}>{modalDetail.description}</div>}
+        </div>
+        <div style={{ borderTop: "1px solid var(--bleu-moyen)", paddingTop: 16, marginBottom: 16 }}>
+          <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 12 }}>Mettre à jour le statut</div>
+          <div className="form-group"><label className="form-label">Nouveau statut</label>
+            <select className="form-input" value={detailForm.statut} onChange={e => setDetailForm({ ...detailForm, statut: e.target.value })}>
+              <option value="ouvert">Ouvert</option>
+              <option value="en_cours">En cours</option>
+              <option value="resolu">Résolu</option>
+            </select>
+          </div>
+          <div className="form-group"><label className="form-label">Commentaire *</label><textarea className="form-input" rows={2} placeholder="Décrivez l'action effectuée..." value={detailForm.commentaire} onChange={e => setDetailForm({ ...detailForm, commentaire: e.target.value })} /></div>
+          <button className="btn btn-primary" style={{ width: "100%" }} onClick={updateStatut}>✅ Mettre à jour</button>
+        </div>
+        {historique.length > 0 && (
+          <div>
+            <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 12, borderTop: "1px solid var(--bleu-moyen)", paddingTop: 16 }}>Historique</div>
+            {historique.map((h, i) => (
+              <div key={h.id} style={{ display: "flex", gap: 12, marginBottom: 12 }}>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+                  <div style={{ width: 10, height: 10, borderRadius: "50%", background: "var(--or)", flexShrink: 0, marginTop: 3 }} />
+                  {i < historique.length - 1 && <div style={{ width: 2, flex: 1, background: "var(--bleu-moyen)", marginTop: 4 }} />}
+                </div>
+                <div style={{ flex: 1, paddingBottom: 8 }}>
+                  <div style={{ fontSize: 11, color: "var(--gris)", marginBottom: 4 }}>{tempsRelatif(h.created_at)}</div>
+                  <div style={{ fontSize: 12, marginBottom: 4 }}>
+                    <span className={`badge ${statutBadge[h.ancien_statut] || "badge-gray"}`}>{statutLabel[h.ancien_statut] || h.ancien_statut}</span>
+                    <span style={{ color: "var(--gris)", margin: "0 6px" }}>→</span>
+                    <span className={`badge ${statutBadge[h.nouveau_statut] || "badge-gray"}`}>{statutLabel[h.nouveau_statut] || h.nouveau_statut}</span>
+                  </div>
+                  {h.commentaire && <div style={{ fontSize: 12, color: "var(--gris)", fontStyle: "italic" }}>"{h.commentaire}"</div>}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Modal>}
+    </div>
+  );
+}
+
 export default function App() {
   const [page, setPage] = useState("dashboard");
   const [toast, setToast] = useState(null);
@@ -993,6 +1153,7 @@ export default function App() {
     travaux: <Travaux showToast={showToast} />,
     assemblees: <Assemblees showToast={showToast} />,
     finance: <Finance />,
+    incidents: <Incidents showToast={showToast} />,
   };
 
   const nav = [
@@ -1003,6 +1164,7 @@ export default function App() {
     { id: "travaux", icon: "🔧", label: "Travaux" },
     { id: "assemblees", icon: "📋", label: "Assemblées Générales" },
     { id: "finance", icon: "📊", label: "Finance" },
+    { id: "incidents", icon: "🔧", label: "Incidents" },
   ];
 
   return (
