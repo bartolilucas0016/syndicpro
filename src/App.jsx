@@ -52,11 +52,13 @@ const styles = `
   .stat-sub { font-size: 11px; color: var(--gris); margin-top: 4px; }
   .table-wrap { overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; }
-  thead th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--gris); padding: 0 0 10px; border-bottom: 1px solid var(--bleu-moyen); }
+  thead th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--gris); padding: 8px 16px 10px 0; border-bottom: 1px solid var(--bleu-moyen); }
+  thead th:last-child { padding-right: 0; }
   tbody tr { border-bottom: 1px solid rgba(30,58,95,0.5); transition: background 0.15s; }
   tbody tr:hover { background: rgba(30,58,95,0.4); }
   tbody tr:last-child { border-bottom: none; }
-  tbody td { padding: 12px 0; font-size: 13px; }
+  tbody td { padding: 14px 16px 14px 0; font-size: 13px; }
+  tbody td:last-child { padding-right: 0; }
   .badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border-radius: 20px; font-size: 11px; font-weight: 600; }
   .badge-green { background: rgba(46,204,113,0.15); color: var(--vert); }
   .badge-orange { background: rgba(243,156,18,0.15); color: var(--orange); }
