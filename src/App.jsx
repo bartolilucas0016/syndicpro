@@ -726,18 +726,32 @@ function Assemblees({ showToast }) {
 function Finance() {
   const [paiements, setPaiements] = useState([]);
   const [charges, setCharges] = useState([]);
+  const [paiementsResidence, setPaiementsResidence] = useState([]);
+  const [residences, setResidences] = useState([]);
+  const [chargesAvenir, setChargesAvenir] = useState([]);
+  const [alertes, setAlertes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [periode, setPeriode] = useState("tout");
   const [tri, setTri] = useState("impaye_desc");
 
   useEffect(() => {
     async function load() {
-      const [p, c] = await Promise.all([
+      const today = new Date().toISOString().split("T")[0];
+      const plus90 = new Date(Date.now() + 90 * 86400000).toISOString().split("T")[0];
+      const [p, c, pr, r, ca, al] = await Promise.all([
         supabase.from("paiements").select("*, coproprietaires(nom, prenom, lot)"),
         supabase.from("charges").select("*"),
+        supabase.from("paiements").select("montant, statut, charges(residence_id, residences(nom))"),
+        supabase.from("residences").select("*"),
+        supabase.from("charges").select("*, paiements(montant, statut)").gte("date_echeance", today).lte("date_echeance", plus90),
+        supabase.from("paiements").select("*, coproprietaires(nom, prenom, lot), charges(titre, date_echeance)").eq("statut", "impaye"),
       ]);
       setPaiements(p.data || []);
       setCharges(c.data || []);
+      setPaiementsResidence(pr.data || []);
+      setResidences(r.data || []);
+      setChargesAvenir(ca.data || []);
+      setAlertes(al.data || []);
       setLoading(false);
     }
     load();
@@ -823,6 +837,24 @@ function Finance() {
   }
   const maxMontant = Math.max(...barres.map(b => b.montant), 1);
 
+  const recouvrementResidences = residences.map(res => {
+    const p = paiementsResidence.filter(p => p.charges?.residence_id === res.id);
+    const totalPaye = p.filter(p => p.statut === "paye").reduce((s, p) => s + p.montant, 0);
+    const totalAttendu = p.reduce((s, p) => s + p.montant, 0);
+    const taux = totalAttendu > 0 ? Math.round(totalPaye / totalAttendu * 100) : 0;
+    return { nom: res.nom, taux, totalAttendu };
+  }).filter(r => r.totalAttendu > 0);
+
+  const totalChargesAvenir = chargesAvenir.reduce((s, c) => s + c.montant_total, 0);
+  const totalDejaPayeAvenir = chargesAvenir.reduce((s, c) => s + (c.paiements || []).filter(p => p.statut === "paye").reduce((ss, p) => ss + p.montant, 0), 0);
+  const resteACollecterAvenir = totalChargesAvenir - totalDejaPayeAvenir;
+
+  const alertesAvecRetard = alertes
+    .filter(p => p.charges?.date_echeance)
+    .map(p => ({ ...p, joursRetard: Math.floor((now - new Date(p.charges.date_echeance)) / 86400000) }))
+    .filter(p => p.joursRetard > 0)
+    .sort((a, b) => b.joursRetard - a.joursRetard);
+
   const sortFn = {
     impaye_desc: (a, b) => b.impaye - a.impaye,
     impaye_asc: (a, b) => a.impaye - b.impaye,
@@ -843,6 +875,66 @@ function Finance() {
         <div className="stat-card"><div className="stat-label">⚠️ Total impayé</div><div className="stat-value" style={{ color: "var(--rouge)" }}>{totalImpaye.toFixed(0)} €</div><div className="stat-sub">en retard</div></div>
         <div className="stat-card"><div className="stat-label">📈 Taux de recouvrement</div><div className="stat-value" style={{ color: tauxRecouvrement >= 80 ? "var(--vert)" : tauxRecouvrement >= 50 ? "var(--orange)" : "var(--rouge)" }}>{tauxRecouvrement}%</div><div className="stat-sub">des charges collectées</div></div>
         <div className="stat-card"><div className="stat-label">📋 Appels de fonds</div><div className="stat-value" style={{ color: "var(--or-clair)" }}>{charges.length}</div><div className="stat-sub">charges enregistrées</div></div>
+      </div>
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="card-header"><span className="card-title">🏢 Recouvrement par résidence</span></div>
+        {recouvrementResidences.length === 0 ? (
+          <div className="empty" style={{ padding: "10px 0" }}><div className="empty-text">Aucune donnée</div></div>
+        ) : recouvrementResidences.map((r, i) => (
+          <div key={i} style={{ marginBottom: 14 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 13 }}>
+              <span>{r.nom}</span>
+              <span style={{ fontWeight: 600, color: r.taux >= 80 ? "var(--vert)" : r.taux >= 50 ? "var(--orange)" : "var(--rouge)" }}>{r.taux}%</span>
+            </div>
+            <div style={{ background: "var(--bleu-moyen)", borderRadius: 4, height: 8, overflow: "hidden" }}>
+              <div style={{ width: `${r.taux}%`, height: "100%", background: r.taux >= 80 ? "var(--vert)" : r.taux >= 50 ? "var(--orange)" : "var(--rouge)", borderRadius: 4, transition: "width 0.4s" }} />
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="card-header"><span className="card-title">📅 Charges à venir — 90 prochains jours</span></div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 16 }}>
+          <div style={{ background: "var(--bleu-nuit)", borderRadius: 8, padding: "12px 16px" }}><div style={{ fontSize: 11, color: "var(--gris)", textTransform: "uppercase", marginBottom: 6 }}>Attendu</div><div style={{ fontSize: 20, fontWeight: 600, color: "var(--or-clair)" }}>{totalChargesAvenir.toFixed(0)} €</div></div>
+          <div style={{ background: "var(--bleu-nuit)", borderRadius: 8, padding: "12px 16px" }}><div style={{ fontSize: 11, color: "var(--gris)", textTransform: "uppercase", marginBottom: 6 }}>Déjà payé</div><div style={{ fontSize: 20, fontWeight: 600, color: "var(--vert)" }}>{totalDejaPayeAvenir.toFixed(0)} €</div></div>
+          <div style={{ background: "var(--bleu-nuit)", borderRadius: 8, padding: "12px 16px" }}><div style={{ fontSize: 11, color: "var(--gris)", textTransform: "uppercase", marginBottom: 6 }}>Reste à collecter</div><div style={{ fontSize: 20, fontWeight: 600, color: resteACollecterAvenir > 0 ? "var(--rouge)" : "var(--vert)" }}>{resteACollecterAvenir.toFixed(0)} €</div></div>
+        </div>
+        {chargesAvenir.length === 0 ? (
+          <div className="empty" style={{ padding: "10px 0" }}><div className="empty-text">Aucune charge à venir</div></div>
+        ) : chargesAvenir.map(c => {
+          const payeCharge = (c.paiements || []).filter(p => p.statut === "paye").reduce((s, p) => s + p.montant, 0);
+          const tauxCharge = c.montant_total > 0 ? Math.round(payeCharge / c.montant_total * 100) : 0;
+          return (
+            <div key={c.id} className="list-item">
+              <div className="list-content"><div className="list-title">{c.titre}</div><div className="list-sub">{c.date_echeance}</div></div>
+              <div style={{ textAlign: "right" }}>
+                <div style={{ color: "var(--or-clair)", fontWeight: 600, fontSize: 13, marginBottom: 4 }}>{c.montant_total} €</div>
+                <span className={`badge ${tauxCharge >= 80 ? "badge-green" : tauxCharge >= 50 ? "badge-orange" : "badge-red"}`}>{tauxCharge}% payé</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="card-header"><span className="card-title">🚨 Alertes retard</span></div>
+        {alertesAvecRetard.length === 0 ? (
+          <div style={{ padding: "16px 0", textAlign: "center", color: "var(--vert)", fontWeight: 600 }}>✓ Aucun retard détecté</div>
+        ) : (
+          <div className="table-wrap"><table>
+            <thead><tr><th>Copropriétaire</th><th>Lot</th><th>Charge</th><th>Montant</th><th>Retard</th></tr></thead>
+            <tbody>
+              {alertesAvecRetard.map((p, i) => (
+                <tr key={i}>
+                  <td><strong>{p.coproprietaires ? `${p.coproprietaires.prenom} ${p.coproprietaires.nom}` : "—"}</strong></td>
+                  <td style={{ color: "var(--or-clair)" }}>{p.coproprietaires?.lot || "—"}</td>
+                  <td>{p.charges?.titre || "—"}</td>
+                  <td style={{ color: "var(--rouge)", fontWeight: 600 }}>{p.montant} €</td>
+                  <td><span className={`badge ${p.joursRetard > 30 ? "badge-red" : "badge-orange"}`}>{p.joursRetard}j</span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table></div>
+        )}
       </div>
       <div className="card" style={{ marginBottom: 16 }}>
         <div className="card-header"><span className="card-title">📅 {titreGraphique}</span></div>
