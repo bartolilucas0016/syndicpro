@@ -1141,6 +1141,186 @@ function Incidents({ showToast }) {
   );
 }
 
+function CarnetEntretien({ showToast }) {
+  const [data, setData] = useState([]);
+  const [residences, setResidences] = useState([]);
+  const [interventions, setInterventions] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [modal, setModal] = useState(false);
+  const [modalIntervention, setModalIntervention] = useState(null);
+  const [modalDetail, setModalDetail] = useState(null);
+
+  const TYPE_EMOJI = { ascenseur: "🛗", extincteurs: "🧯", chaudiere: "🔥", electricite: "⚡", colonnes_eau: "💧" };
+  const TYPE_LABEL = { ascenseur: "Ascenseur", extincteurs: "Extincteurs", chaudiere: "Chaudière", electricite: "Électricité", colonnes_eau: "Colonnes d'eau" };
+  const PERIODICITE_DEFAUT = { ascenseur: 12, extincteurs: 12, chaudiere: 12, electricite: 60, colonnes_eau: 12 };
+
+  const emptyForm = { type: "ascenseur", label: "", residence_id: "", periodicite_mois: 12, derniere_intervention: "", prestataire: "", notes: "" };
+  const emptyFormInt = { date_intervention: new Date().toISOString().split("T")[0], prestataire: "", rapport: "" };
+  const [form, setForm] = useState(emptyForm);
+  const [formInt, setFormInt] = useState(emptyFormInt);
+
+  function calcProchaine(derniere, periodicite) {
+    if (!derniere) return null;
+    const d = new Date(derniere);
+    d.setMonth(d.getMonth() + parseInt(periodicite));
+    return d.toISOString().split("T")[0];
+  }
+
+  async function load() {
+    const [e, r] = await Promise.all([
+      supabase.from("entretiens").select("*, residences(nom)").order("prochaine_echeance", { ascending: true }),
+      supabase.from("residences").select("*"),
+    ]);
+    setData(e.data || []);
+    setResidences(r.data || []);
+    setLoading(false);
+  }
+  useEffect(() => { load(); }, []);
+
+  async function openDetail(entretien) {
+    setModalDetail(entretien);
+    const { data: hist } = await supabase.from("entretiens_interventions").select("*").eq("entretien_id", entretien.id).order("date_intervention", { ascending: false });
+    setInterventions(hist || []);
+  }
+
+  async function save() {
+    if (!form.label) return showToast("Le label est obligatoire", "error");
+    const payload = { ...form, periodicite_mois: parseInt(form.periodicite_mois), prochaine_echeance: calcProchaine(form.derniere_intervention, form.periodicite_mois) || null, residence_id: form.residence_id || null };
+    const { error } = await supabase.from("entretiens").insert([payload]);
+    if (error) return showToast("Erreur : " + error.message, "error");
+    showToast("Équipement ajouté ✓", "success");
+    setModal(false); setForm(emptyForm); load();
+  }
+
+  async function saveIntervention() {
+    if (!formInt.date_intervention) return showToast("La date est obligatoire", "error");
+    const { error } = await supabase.from("entretiens_interventions").insert([{ entretien_id: modalIntervention.id, date_intervention: formInt.date_intervention, prestataire: formInt.prestataire, rapport: formInt.rapport }]);
+    if (error) return showToast("Erreur : " + error.message, "error");
+    await supabase.from("entretiens").update({ derniere_intervention: formInt.date_intervention, prochaine_echeance: calcProchaine(formInt.date_intervention, modalIntervention.periodicite_mois), ...(formInt.prestataire ? { prestataire: formInt.prestataire } : {}) }).eq("id", modalIntervention.id);
+    showToast("Intervention enregistrée ✓", "success");
+    setModalIntervention(null); setFormInt(emptyFormInt); load();
+  }
+
+  if (loading) return <div className="loading">⏳ Chargement...</div>;
+
+  const today = new Date().toISOString().split("T")[0];
+  const plus30 = new Date(Date.now() + 30 * 86400000).toISOString().split("T")[0];
+
+  function urgence(e) {
+    if (!e.prochaine_echeance) return "inconnu";
+    if (e.prochaine_echeance < today) return "retard";
+    if (e.prochaine_echeance <= plus30) return "urgent";
+    return "ok";
+  }
+
+  const urgOrdre = { retard: 0, urgent: 1, ok: 2, inconnu: 3 };
+  const sortedData = [...data].sort((a, b) => urgOrdre[urgence(a)] - urgOrdre[urgence(b)]);
+  const enRetard = data.filter(e => urgence(e) === "retard").length;
+  const urgentCount = data.filter(e => urgence(e) === "urgent").length;
+  const aJour = data.filter(e => urgence(e) === "ok").length;
+
+  const parResidence = {};
+  sortedData.forEach(e => {
+    const key = e.residence_id || "__sans__";
+    if (!parResidence[key]) parResidence[key] = { nom: e.residences?.nom || "Sans résidence", items: [] };
+    parResidence[key].items.push(e);
+  });
+
+  return (
+    <div>
+      <div className="topbar">
+        <div><div className="page-title">📋 Carnet d'entretien</div><div className="page-sub">{data.length} équipement(s) suivi(s)</div></div>
+        <button className="btn btn-primary" onClick={() => setModal(true)}>+ Ajouter un équipement</button>
+      </div>
+      <div className="grid-3" style={{ marginBottom: 20 }}>
+        <div className="stat-card"><div className="stat-label">🔴 En retard</div><div className="stat-value" style={{ color: "var(--rouge)" }}>{enRetard}</div><div className="stat-sub">intervention requise</div></div>
+        <div className="stat-card"><div className="stat-label">🟠 Échéance &lt; 30j</div><div className="stat-value" style={{ color: "var(--orange)" }}>{urgentCount}</div><div className="stat-sub">à planifier</div></div>
+        <div className="stat-card"><div className="stat-label">✅ À jour</div><div className="stat-value" style={{ color: "var(--vert)" }}>{aJour}</div><div className="stat-sub">conformes</div></div>
+      </div>
+      {data.length === 0 && <div className="card"><div className="empty"><div className="empty-icon">📋</div><div className="empty-text">Aucun équipement suivi</div></div></div>}
+      {Object.values(parResidence).map(({ nom, items }) => (
+        <div key={nom} className="card" style={{ marginBottom: 16 }}>
+          <div className="card-header"><span className="card-title">🏢 {nom}</span><span style={{ color: "var(--gris)", fontSize: 12 }}>{items.length} équipement(s)</span></div>
+          <div className="table-wrap"><table>
+            <thead><tr><th>Équipement</th><th>Prochaine échéance</th><th>Prestataire</th><th>Statut</th><th></th></tr></thead>
+            <tbody>
+              {items.map(e => {
+                const urg = urgence(e);
+                const badgeCls = urg === "retard" ? "badge-red" : urg === "urgent" ? "badge-orange" : urg === "ok" ? "badge-green" : "badge-gray";
+                const badgeLabel = urg === "retard" ? "En retard" : urg === "urgent" ? "< 30 jours" : urg === "ok" ? "OK" : "—";
+                return (
+                  <tr key={e.id}>
+                    <td><strong>{TYPE_EMOJI[e.type] || "🔧"} {e.label}</strong></td>
+                    <td style={{ color: urg === "retard" ? "var(--rouge)" : urg === "urgent" ? "var(--orange)" : "var(--gris)" }}>{e.prochaine_echeance ? new Date(e.prochaine_echeance).toLocaleDateString("fr-FR") : "—"}</td>
+                    <td style={{ color: "var(--gris)" }}>{e.prestataire || "—"}</td>
+                    <td><span className={`badge ${badgeCls}`}>{badgeLabel}</span></td>
+                    <td>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button className="btn btn-primary btn-sm" onClick={() => { setModalIntervention(e); setFormInt({ ...emptyFormInt, prestataire: e.prestataire || "" }); }}>✓ Fait</button>
+                        <button className="btn btn-secondary btn-sm" onClick={() => openDetail(e)}>Historique</button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table></div>
+        </div>
+      ))}
+      {modal && <Modal title="📋 Ajouter un équipement" onClose={() => { setModal(false); setForm(emptyForm); }}>
+        <div className="form-row">
+          <div className="form-group"><label className="form-label">Type *</label>
+            <select className="form-input" value={form.type} onChange={e => setForm({ ...form, type: e.target.value, periodicite_mois: PERIODICITE_DEFAUT[e.target.value] || 12 })}>
+              {Object.entries(TYPE_LABEL).map(([k, v]) => <option key={k} value={k}>{TYPE_EMOJI[k]} {v}</option>)}
+            </select>
+          </div>
+          <div className="form-group"><label className="form-label">Label *</label><input className="form-input" placeholder="ex: Ascenseur bât. A" value={form.label} onChange={e => setForm({ ...form, label: e.target.value })} /></div>
+        </div>
+        <div className="form-row">
+          <div className="form-group"><label className="form-label">Résidence</label>
+            <select className="form-input" value={form.residence_id} onChange={e => setForm({ ...form, residence_id: e.target.value })}>
+              <option value="">Sélectionner...</option>
+              {residences.map(r => <option key={r.id} value={r.id}>{r.nom}</option>)}
+            </select>
+          </div>
+          <div className="form-group"><label className="form-label">Périodicité (mois)</label><input className="form-input" type="number" min="1" value={form.periodicite_mois} onChange={e => setForm({ ...form, periodicite_mois: e.target.value })} /></div>
+        </div>
+        <div className="form-row">
+          <div className="form-group"><label className="form-label">Dernière intervention</label><input className="form-input" type="date" value={form.derniere_intervention} onChange={e => setForm({ ...form, derniere_intervention: e.target.value })} /></div>
+          <div className="form-group"><label className="form-label">Prestataire habituel</label><input className="form-input" value={form.prestataire} onChange={e => setForm({ ...form, prestataire: e.target.value })} /></div>
+        </div>
+        <div className="form-group"><label className="form-label">Notes</label><textarea className="form-input" rows={2} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></div>
+        <div className="modal-actions"><button className="btn btn-secondary" onClick={() => { setModal(false); setForm(emptyForm); }}>Annuler</button><button className="btn btn-primary" onClick={save}>✅ Enregistrer</button></div>
+      </Modal>}
+      {modalIntervention && <Modal title={`✓ Intervention — ${TYPE_EMOJI[modalIntervention.type]} ${modalIntervention.label}`} onClose={() => { setModalIntervention(null); setFormInt(emptyFormInt); }}>
+        <div className="form-group"><label className="form-label">Date de l'intervention *</label><input className="form-input" type="date" value={formInt.date_intervention} onChange={e => setFormInt({ ...formInt, date_intervention: e.target.value })} /></div>
+        <div className="form-group"><label className="form-label">Prestataire</label><input className="form-input" value={formInt.prestataire} onChange={e => setFormInt({ ...formInt, prestataire: e.target.value })} /></div>
+        <div className="form-group"><label className="form-label">Rapport / Notes</label><textarea className="form-input" rows={3} value={formInt.rapport} onChange={e => setFormInt({ ...formInt, rapport: e.target.value })} /></div>
+        {formInt.date_intervention && <div style={{ fontSize: 12, color: "var(--gris)", marginBottom: 16 }}>Prochaine échéance calculée : <strong style={{ color: "var(--or-clair)" }}>{new Date(calcProchaine(formInt.date_intervention, modalIntervention.periodicite_mois)).toLocaleDateString("fr-FR")}</strong></div>}
+        <div className="modal-actions"><button className="btn btn-secondary" onClick={() => { setModalIntervention(null); setFormInt(emptyFormInt); }}>Annuler</button><button className="btn btn-primary" onClick={saveIntervention}>✅ Enregistrer</button></div>
+      </Modal>}
+      {modalDetail && <Modal title={`📋 Historique — ${TYPE_EMOJI[modalDetail.type]} ${modalDetail.label}`} onClose={() => setModalDetail(null)}>
+        <div style={{ fontSize: 13, color: "var(--gris)", marginBottom: 16 }}>{modalDetail.residences?.nom || "—"} · Périodicité : {modalDetail.periodicite_mois} mois</div>
+        {interventions.length === 0 ? (
+          <div className="empty"><div className="empty-text">Aucune intervention enregistrée</div></div>
+        ) : interventions.map((int, i) => (
+          <div key={int.id} style={{ display: "flex", gap: 12, marginBottom: 12 }}>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+              <div style={{ width: 10, height: 10, borderRadius: "50%", background: "var(--vert)", flexShrink: 0, marginTop: 3 }} />
+              {i < interventions.length - 1 && <div style={{ width: 2, flex: 1, background: "var(--bleu-moyen)", marginTop: 4 }} />}
+            </div>
+            <div style={{ flex: 1, paddingBottom: 8 }}>
+              <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 2 }}>{new Date(int.date_intervention).toLocaleDateString("fr-FR")}</div>
+              {int.prestataire && <div style={{ fontSize: 12, color: "var(--gris)", marginBottom: 2 }}>🔧 {int.prestataire}</div>}
+              {int.rapport && <div style={{ fontSize: 12, background: "var(--bleu-nuit)", padding: "6px 10px", borderRadius: 6, marginTop: 4 }}>{int.rapport}</div>}
+            </div>
+          </div>
+        ))}
+      </Modal>}
+    </div>
+  );
+}
+
 export default function App() {
   const [page, setPage] = useState("dashboard");
   const [toast, setToast] = useState(null);
@@ -1154,6 +1334,7 @@ export default function App() {
     assemblees: <Assemblees showToast={showToast} />,
     finance: <Finance />,
     incidents: <Incidents showToast={showToast} />,
+    carnet: <CarnetEntretien showToast={showToast} />,
   };
 
   const nav = [
@@ -1165,6 +1346,7 @@ export default function App() {
     { id: "assemblees", icon: "📋", label: "Assemblées Générales" },
     { id: "finance", icon: "📊", label: "Finance" },
     { id: "incidents", icon: "🔧", label: "Incidents" },
+    { id: "carnet", icon: "📋", label: "Carnet d'entretien" },
   ];
 
   return (
