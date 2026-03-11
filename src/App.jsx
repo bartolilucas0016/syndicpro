@@ -272,6 +272,25 @@ function Charges({ showToast }) {
     const { error } = await supabase.from("paiements").insert([{ ...formPaiement, montant: parseFloat(formPaiement.montant) }]);
     if (error) return showToast("Erreur : " + error.message, "error");
     showToast("Paiement enregistré ✓", "success"); setModalPaiement(false); load();
+    try {
+  await fetch("/api/envoyer-email", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      type: "recu",
+      destinataire: copros.find(c => c.id === formPaiement.coproprietaire_id)?.email,
+      donnees: {
+        nom: copros.find(c => c.id === formPaiement.coproprietaire_id)?.nom,
+        prenom: copros.find(c => c.id === formPaiement.coproprietaire_id)?.prenom,
+        lot: copros.find(c => c.id === formPaiement.coproprietaire_id)?.lot,
+        montant: formPaiement.montant,
+        date: formPaiement.date_paiement,
+      },
+    }),
+  });
+} catch (e) {
+  console.log("Email non envoyé", e);
+}
   }
 
   if (loading) return <div className="loading">⏳ Chargement...</div>;
@@ -296,7 +315,7 @@ function Charges({ showToast }) {
           {paiements.length === 0 ? <div className="empty"><div className="empty-icon">💳</div><div className="empty-text">Aucun paiement</div></div> : (
             <div className="table-wrap"><table>
               <thead><tr><th>Copropriétaire</th><th>Montant</th><th>Statut</th></tr></thead>
-              <tbody>{paiements.map(p => <tr key={p.id}><td>{p.coproprietaires ? `${p.coproprietaires.prenom} ${p.coproprietaires.nom}` : "—"}</td><td style={{ color: "var(--or-clair)", fontWeight: 600 }}>{p.montant} €</td><td><Badge statut={p.statut} /></td></tr>)}</tbody>
+              <tbody>{paiements.map(p => <tr key={p.id}><td>{p.coproprietaires ? `${p.coproprietaires.prenom} ${p.coproprietaires.nom}` : "—"}</td><td style={{ color: "var(--or-clair)", fontWeight: 600 }}>{p.montant} €</td><td><Badge statut={p.statut} /></td><td><button className="btn btn-danger btn-sm" onClick={async () => { const copro = p.coproprietaires; if (!copro?.email) return showToast("Email manquant", "error"); await fetch("/api/envoyer-email", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "relance", destinataire: copro.email, donnees: { nom: copro.nom, prenom: copro.prenom, lot: copro.lot, montant: p.montant } }) }); showToast("Relance envoyée ✓", "success"); }}>📧 Relance</button></td></tr>)}</tbody>
             </table></div>
           )}
         </div>
