@@ -1323,10 +1323,79 @@ function CarnetEntretien({ showToast }) {
   );
 }
 
+function Login() {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) setError(error.message);
+    setLoading(false);
+  }
+
+  return (
+    <>
+      <style>{styles}</style>
+      <div style={{ minHeight: "100vh", background: "var(--bleu-nuit)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ background: "var(--bleu-profond)", border: "1px solid var(--bleu-moyen)", borderRadius: 16, padding: "48px 40px", width: 380, boxShadow: "0 20px 60px rgba(0,0,0,0.4)" }}>
+          <div style={{ textAlign: "center", marginBottom: 32 }}>
+            <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 28, color: "var(--or)", marginBottom: 6 }}>SyndicPro</div>
+            <div style={{ color: "var(--gris)", fontSize: 14 }}>Gestion copropriété</div>
+          </div>
+          <form onSubmit={handleSubmit}>
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: "block", color: "var(--gris)", fontSize: 13, marginBottom: 6 }}>Adresse email</label>
+              <input
+                type="email"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                required
+                placeholder="syndic@exemple.fr"
+                style={{ width: "100%", background: "var(--bleu-nuit)", border: "1px solid var(--bleu-moyen)", borderRadius: 8, padding: "10px 14px", color: "var(--blanc)", fontSize: 14, outline: "none" }}
+              />
+            </div>
+            <div style={{ marginBottom: 24 }}>
+              <label style={{ display: "block", color: "var(--gris)", fontSize: 13, marginBottom: 6 }}>Mot de passe</label>
+              <input
+                type="password"
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                required
+                placeholder="••••••••"
+                style={{ width: "100%", background: "var(--bleu-nuit)", border: "1px solid var(--bleu-moyen)", borderRadius: 8, padding: "10px 14px", color: "var(--blanc)", fontSize: 14, outline: "none" }}
+              />
+            </div>
+            {error && <div style={{ background: "rgba(231,76,60,0.15)", border: "1px solid var(--rouge)", borderRadius: 8, padding: "10px 14px", color: "var(--rouge)", fontSize: 13, marginBottom: 16 }}>{error}</div>}
+            <button type="submit" disabled={loading} style={{ width: "100%", background: "var(--or)", color: "var(--bleu-nuit)", border: "none", borderRadius: 8, padding: "12px", fontWeight: 600, fontSize: 15, cursor: loading ? "not-allowed" : "pointer", opacity: loading ? 0.7 : 1 }}>
+              {loading ? "Connexion…" : "Se connecter"}
+            </button>
+          </form>
+        </div>
+      </div>
+    </>
+  );
+}
+
 export default function App() {
+  const [session, setSession] = useState(undefined);
   const [page, setPage] = useState("dashboard");
   const [toast, setToast] = useState(null);
   function showToast(message, type = "success") { setToast({ message, type }); }
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => setSession(session));
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => setSession(session));
+    return () => subscription.unsubscribe();
+  }, []);
+
+  if (session === undefined) return null;
+  if (!session) return <Login />;
+
   const pages = {
     dashboard: <Dashboard />,
     residences: <Residences showToast={showToast} />,
@@ -1347,9 +1416,11 @@ export default function App() {
     { id: "travaux", icon: "🔧", label: "Travaux" },
     { id: "assemblees", icon: "📋", label: "Assemblées Générales" },
     { id: "finance", icon: "📊", label: "Finance" },
-    { id: "incidents", icon: "🔧", label: "Incidents" },
-    { id: "carnet", icon: "📋", label: "Carnet d'entretien" },
+    { id: "incidents", icon: "⚠️", label: "Incidents" },
+    { id: "carnet", icon: "🗒️", label: "Carnet d'entretien" },
   ];
+
+  const initiales = session.user.email.slice(0, 2).toUpperCase();
 
   return (
     <>
@@ -1361,7 +1432,14 @@ export default function App() {
             <div className="nav-label">Navigation</div>
             {nav.map(item => <div key={item.id} className={`nav-item ${page === item.id ? "active" : ""}`} onClick={() => setPage(item.id)}><span>{item.icon}</span>{item.label}</div>)}
           </nav>
-          <div className="sidebar-user"><div className="avatar">SD</div><div><div className="user-name">Syndic</div><div className="user-role">Administrateur</div></div></div>
+          <div className="sidebar-user">
+            <div className="avatar">{initiales}</div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div className="user-name" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{session.user.email}</div>
+              <div className="user-role">Administrateur</div>
+            </div>
+            <button onClick={() => supabase.auth.signOut()} title="Déconnexion" style={{ background: "none", border: "none", color: "var(--gris)", cursor: "pointer", fontSize: 18, padding: "4px", flexShrink: 0 }}>⏻</button>
+          </div>
         </aside>
         <main className="main">{pages[page]}</main>
         {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
