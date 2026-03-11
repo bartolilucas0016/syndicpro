@@ -251,8 +251,8 @@ function Charges({ showToast }) {
   async function load() {
     const [ch, p, c, r] = await Promise.all([
       supabase.from("charges").select("*, residences(nom)").order("date_echeance", { ascending: false }),
-      .select("*, coproprietaires(nom, prenom, lot, email), charges(titre)").order("created_at", { ascending: false }),
-      supabase.from("coproprietaires").select("id, nom, prenom, lot, email"),
+      supabase.from("paiements").select("*, coproprietaires(nom, prenom, lot), charges(titre)").order("created_at", { ascending: false }),
+      supabase.from("coproprietaires").select("id, nom, prenom, lot"),
       supabase.from("residences").select("id, nom"),
     ]);
     setCharges(ch.data || []); setPaiements(p.data || []); setCopros(c.data || []); setResidences(r.data || []); setLoading(false);
