@@ -85,8 +85,6 @@ const styles = `
   .toast { position: fixed; bottom: 24px; right: 24px; z-index: 9999; background: var(--bleu-profond); border: 1px solid var(--bleu-moyen); border-radius: 10px; padding: 14px 18px; font-size: 13px; display: flex; align-items: center; gap: 10px; box-shadow: 0 8px 30px rgba(0,0,0,0.4); }
   .toast-success { border-left: 3px solid var(--vert); }
   .toast-error { border-left: 3px solid var(--rouge); }
-  .progress-bar { height: 5px; background: var(--bleu-moyen); border-radius: 3px; overflow: hidden; margin-top: 8px; }
-  .progress-fill { height: 100%; border-radius: 3px; transition: width 0.8s ease; }
 `;
 
 function Toast({ message, type, onClose }) {
@@ -424,7 +422,83 @@ function Travaux({ showToast }) {
     </div>
   );
 }
+function Residences({ showToast }) {
+  const [data, setData] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [modal, setModal] = useState(false);
+  const [form, setForm] = useState({ nom: "", adresse: "", ville: "", code_postal: "", nb_lots: "" });
 
+  async function load() {
+    const { data: r } = await supabase.from("residences").select("*").order("nom");
+    setData(r || []);
+    setLoading(false);
+  }
+
+  useEffect(() => { load(); }, []);
+
+  async function save() {
+    if (!form.nom || !form.adresse || !form.ville) return showToast("Remplissez les champs obligatoires", "error");
+    const { error } = await supabase.from("residences").insert([{ ...form, nb_lots: parseInt(form.nb_lots) || 0 }]);
+    if (error) return showToast("Erreur : " + error.message, "error");
+    showToast("Résidence ajoutée ✓", "success");
+    setModal(false);
+    setForm({ nom: "", adresse: "", ville: "", code_postal: "", nb_lots: "" });
+    load();
+  }
+
+  async function supprimer(id) {
+    if (!confirm("Supprimer cette résidence ?")) return;
+    await supabase.from("residences").delete().eq("id", id);
+    showToast("Supprimée", "success");
+    load();
+  }
+
+  if (loading) return <div className="loading">⏳ Chargement...</div>;
+
+  return (
+    <div>
+      <div className="topbar">
+        <div>
+          <div className="page-title">🏢 Résidences</div>
+          <div className="page-sub">{data.length} résidence(s) gérée(s)</div>
+        </div>
+        <button className="btn btn-primary" onClick={() => setModal(true)}>+ Ajouter</button>
+      </div>
+      <div className="grid-3">
+        {data.length === 0 ? (
+          <div className="empty"><div className="empty-icon">🏢</div><div className="empty-text">Aucune résidence</div></div>
+        ) : data.map(r => (
+          <div className="card" key={r.id}>
+            <div className="card-header">
+              <span className="card-title">🏢 {r.nom}</span>
+              <button className="btn btn-danger btn-sm" onClick={() => supprimer(r.id)}>🗑️</button>
+            </div>
+            <div style={{ fontSize: 13, color: "var(--gris)", lineHeight: 1.8 }}>
+              <div>📍 {r.adresse}</div>
+              <div>🏙️ {r.code_postal} {r.ville}</div>
+              <div>🔑 {r.nb_lots} lots</div>
+            </div>
+          </div>
+        ))}
+      </div>
+      {modal && (
+        <Modal title="🏢 Nouvelle résidence" onClose={() => setModal(false)}>
+          <div className="form-group"><label className="form-label">Nom *</label><input className="form-input" placeholder="ex: Les Oliviers" value={form.nom} onChange={e => setForm({ ...form, nom: e.target.value })} /></div>
+          <div className="form-group"><label className="form-label">Adresse *</label><input className="form-input" placeholder="ex: 12 Avenue des Mimosas" value={form.adresse} onChange={e => setForm({ ...form, adresse: e.target.value })} /></div>
+          <div className="form-row">
+            <div className="form-group"><label className="form-label">Ville *</label><input className="form-input" value={form.ville} onChange={e => setForm({ ...form, ville: e.target.value })} /></div>
+            <div className="form-group"><label className="form-label">Code postal</label><input className="form-input" value={form.code_postal} onChange={e => setForm({ ...form, code_postal: e.target.value })} /></div>
+          </div>
+          <div className="form-group"><label className="form-label">Nombre de lots</label><input className="form-input" type="number" value={form.nb_lots} onChange={e => setForm({ ...form, nb_lots: e.target.value })} /></div>
+          <div className="modal-actions">
+            <button className="btn btn-secondary" onClick={() => setModal(false)}>Annuler</button>
+            <button className="btn btn-primary" onClick={save}>✅ Enregistrer</button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
 function Assemblees({ showToast }) {
   const [data, setData] = useState([]);
   const [residences, setResidences] = useState([]);
@@ -493,8 +567,24 @@ export default function App() {
   const [page, setPage] = useState("dashboard");
   const [toast, setToast] = useState(null);
   function showToast(message, type = "success") { setToast({ message, type }); }
-  const pages = { dashboard: <Dashboard />, coproprietaires: <Coproprietaires showToast={showToast} />, charges: <Charges showToast={showToast} />, travaux: <Travaux showToast={showToast} />, assemblees: <Assemblees showToast={showToast} /> };
-  const nav = [{ id: "dashboard", icon: "🏠", label: "Tableau de bord" }, { id: "coproprietaires", icon: "👥", label: "Copropriétaires" }, { id: "charges", icon: "💰", label: "Charges & Paiements" }, { id: "travaux", icon: "🔧", label: "Travaux" }, { id: "assemblees", icon: "📋", label: "Assemblées Générales" }];
+const pages = {
+    dashboard: <Dashboard />,
+    residences: <Residences showToast={showToast} />,
+    coproprietaires: <Coproprietaires showToast={showToast} />,
+    charges: <Charges showToast={showToast} />,
+    travaux: <Travaux showToast={showToast} />,
+    assemblees: <Assemblees showToast={showToast} />,
+  };
+
+  const nav = [
+    { id: "dashboard", icon: "🏠", label: "Tableau de bord" },
+    { id: "residences", icon: "🏢", label: "Résidences" },
+    { id: "coproprietaires", icon: "👥", label: "Copropriétaires" },
+    { id: "charges", icon: "💰", label: "Charges & Paiements" },
+    { id: "travaux", icon: "🔧", label: "Travaux" },
+    { id: "assemblees", icon: "📋", label: "Assemblées Générales" },
+  ];
+
   return (
     <>
       <style>{styles}</style>
@@ -513,3 +603,4 @@ export default function App() {
     </>
   );
 }
+
