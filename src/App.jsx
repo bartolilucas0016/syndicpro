@@ -766,18 +766,62 @@ function Finance() {
     else if (p.statut === "impaye") parCopro[key].impaye += p.montant;
   });
 
-  const mois = [];
-  for (let i = 11; i >= 0; i--) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-    mois.push({ key, label: d.toLocaleDateString("fr-FR", { month: "short" }), montant: 0 });
+  let barres = [];
+  let titreGraphique = "";
+  const paiementsPaye = paiements.filter(p => p.statut === "paye" && p.date_paiement);
+
+  if (periode === "semaine") {
+    titreGraphique = "Encaissements — 7 derniers jours";
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(now); d.setDate(now.getDate() - i);
+      const key = d.toISOString().split("T")[0];
+      const label = d.toLocaleDateString("fr-FR", { weekday: "short" });
+      barres.push({ key, label, montant: 0 });
+    }
+    paiementsPaye.forEach(p => {
+      const b = barres.find(b => b.key === p.date_paiement);
+      if (b) b.montant += p.montant;
+    });
+  } else if (periode === "mois") {
+    titreGraphique = "Encaissements — ce mois";
+    const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    barres = [
+      { key: "S1", label: "S1", montant: 0, min: 1, max: 7 },
+      { key: "S2", label: "S2", montant: 0, min: 8, max: 14 },
+      { key: "S3", label: "S3", montant: 0, min: 15, max: 21 },
+      { key: "S4", label: "S4", montant: 0, min: 22, max: 31 },
+    ];
+    paiementsPaye.filter(p => p.date_paiement.startsWith(ym)).forEach(p => {
+      const jour = parseInt(p.date_paiement.split("-")[2]);
+      const b = barres.find(b => jour >= b.min && jour <= b.max);
+      if (b) b.montant += p.montant;
+    });
+  } else if (periode === "annee") {
+    titreGraphique = "Encaissements — cette année";
+    for (let m = 0; m < 12; m++) {
+      const d = new Date(now.getFullYear(), m, 1);
+      const key = `${now.getFullYear()}-${String(m + 1).padStart(2, "0")}`;
+      barres.push({ key, label: d.toLocaleDateString("fr-FR", { month: "short" }), montant: 0 });
+    }
+    paiementsPaye.forEach(p => {
+      const key = p.date_paiement.substring(0, 7);
+      const b = barres.find(b => b.key === key);
+      if (b) b.montant += p.montant;
+    });
+  } else {
+    titreGraphique = "Encaissements — 12 derniers mois";
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      barres.push({ key, label: d.toLocaleDateString("fr-FR", { month: "short" }), montant: 0 });
+    }
+    paiementsPaye.forEach(p => {
+      const key = p.date_paiement.substring(0, 7);
+      const b = barres.find(b => b.key === key);
+      if (b) b.montant += p.montant;
+    });
   }
-  paiementsFiltres.filter(p => p.statut === "paye" && p.date_paiement).forEach(p => {
-    const key = p.date_paiement.substring(0, 7);
-    const m = mois.find(m => m.key === key);
-    if (m) m.montant += p.montant;
-  });
-  const maxMontant = Math.max(...mois.map(m => m.montant), 1);
+  const maxMontant = Math.max(...barres.map(b => b.montant), 1);
 
   const sortFn = {
     impaye_desc: (a, b) => b.impaye - a.impaye,
@@ -801,13 +845,13 @@ function Finance() {
         <div className="stat-card"><div className="stat-label">📋 Appels de fonds</div><div className="stat-value" style={{ color: "var(--or-clair)" }}>{charges.length}</div><div className="stat-sub">charges enregistrées</div></div>
       </div>
       <div className="card" style={{ marginBottom: 16 }}>
-        <div className="card-header"><span className="card-title">📅 Encaissements — 12 derniers mois</span></div>
+        <div className="card-header"><span className="card-title">📅 {titreGraphique}</span></div>
         <div style={{ display: "flex", alignItems: "flex-end", gap: 8, height: 140, padding: "8px 0 0" }}>
-          {mois.map(m => (
-            <div key={m.key} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
-              <div style={{ fontSize: 10, color: "var(--or-clair)", fontWeight: 600, minHeight: 14 }}>{m.montant > 0 ? m.montant + "€" : ""}</div>
-              <div style={{ width: "100%", background: m.montant > 0 ? "var(--or)" : "var(--bleu-moyen)", borderRadius: "4px 4px 0 0", height: `${Math.max((m.montant / maxMontant) * 80, 4)}px`, transition: "height 0.3s" }} />
-              <div style={{ fontSize: 10, color: "var(--gris)" }}>{m.label}</div>
+          {barres.map(b => (
+            <div key={b.key} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+              <div style={{ fontSize: 10, color: "var(--or-clair)", fontWeight: 600, minHeight: 14 }}>{b.montant > 0 ? b.montant + "€" : ""}</div>
+              <div style={{ width: "100%", background: b.montant > 0 ? "var(--or)" : "var(--bleu-moyen)", borderRadius: "4px 4px 0 0", height: `${Math.max((b.montant / maxMontant) * 80, 4)}px`, transition: "height 0.3s" }} />
+              <div style={{ fontSize: 10, color: "var(--gris)" }}>{b.label}</div>
             </div>
           ))}
         </div>
