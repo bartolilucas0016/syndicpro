@@ -1325,57 +1325,86 @@ function CarnetEntretien({ showToast, userId }) {
 }
 
 function Login() {
+  const [mode, setMode] = useState("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [success, setSuccess] = useState(null);
+
+  function switchMode(m) {
+    setMode(m);
+    setError(null);
+    setSuccess(null);
+    setEmail("");
+    setPassword("");
+  }
 
   async function handleSubmit(e) {
     e.preventDefault();
     setLoading(true);
     setError(null);
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) setError(error.message);
+    setSuccess(null);
+
+    if (mode === "login") {
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) setError(error.message);
+    } else {
+      const { error } = await supabase.auth.signUp({ email, password });
+      if (error) setError(error.message);
+      else setSuccess("Compte créé ! Vérifiez votre email pour confirmer votre inscription.");
+    }
+
     setLoading(false);
   }
+
+  const inputStyle = { width: "100%", background: "var(--bleu-nuit)", border: "1px solid var(--bleu-moyen)", borderRadius: 8, padding: "10px 14px", color: "var(--blanc)", fontSize: 14, outline: "none" };
 
   return (
     <>
       <style>{styles}</style>
       <div style={{ position: "fixed", inset: 0, background: "var(--bleu-nuit)", display: "flex", alignItems: "center", justifyContent: "center" }}>
         <div style={{ background: "var(--bleu-profond)", border: "1px solid var(--bleu-moyen)", borderRadius: 16, padding: "48px 40px", width: 380, boxShadow: "0 20px 60px rgba(0,0,0,0.4)" }}>
+
           <div style={{ textAlign: "center", marginBottom: 32 }}>
             <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 28, color: "var(--or)", marginBottom: 6 }}>SyndicPro</div>
             <div style={{ color: "var(--gris)", fontSize: 14 }}>Gestion copropriété</div>
           </div>
+
+          <div style={{ display: "flex", background: "var(--bleu-nuit)", borderRadius: 10, padding: 4, marginBottom: 28 }}>
+            {["login", "register"].map(m => (
+              <button key={m} onClick={() => switchMode(m)} style={{ flex: 1, padding: "8px", borderRadius: 7, border: "none", cursor: "pointer", fontWeight: 500, fontSize: 13, transition: "all 0.2s", background: mode === m ? "var(--bleu-moyen)" : "transparent", color: mode === m ? "var(--blanc)" : "var(--gris)" }}>
+                {m === "login" ? "Se connecter" : "S'inscrire"}
+              </button>
+            ))}
+          </div>
+
           <form onSubmit={handleSubmit}>
             <div style={{ marginBottom: 16 }}>
               <label style={{ display: "block", color: "var(--gris)", fontSize: 13, marginBottom: 6 }}>Adresse email</label>
-              <input
-                type="email"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                required
-                placeholder="syndic@exemple.fr"
-                style={{ width: "100%", background: "var(--bleu-nuit)", border: "1px solid var(--bleu-moyen)", borderRadius: 8, padding: "10px 14px", color: "var(--blanc)", fontSize: 14, outline: "none" }}
-              />
+              <input type="email" value={email} onChange={e => setEmail(e.target.value)} required placeholder="syndic@exemple.fr" style={inputStyle} />
             </div>
             <div style={{ marginBottom: 24 }}>
-              <label style={{ display: "block", color: "var(--gris)", fontSize: 13, marginBottom: 6 }}>Mot de passe</label>
-              <input
-                type="password"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                required
-                placeholder="••••••••"
-                style={{ width: "100%", background: "var(--bleu-nuit)", border: "1px solid var(--bleu-moyen)", borderRadius: 8, padding: "10px 14px", color: "var(--blanc)", fontSize: 14, outline: "none" }}
-              />
+              <label style={{ display: "block", color: "var(--gris)", fontSize: 13, marginBottom: 6 }}>Mot de passe{mode === "register" && <span style={{ color: "var(--gris)", fontWeight: 400 }}> (6 caractères min.)</span>}</label>
+              <input type="password" value={password} onChange={e => setPassword(e.target.value)} required placeholder="••••••••" style={inputStyle} />
             </div>
+
             {error && <div style={{ background: "rgba(231,76,60,0.15)", border: "1px solid var(--rouge)", borderRadius: 8, padding: "10px 14px", color: "var(--rouge)", fontSize: 13, marginBottom: 16 }}>{error}</div>}
+            {success && <div style={{ background: "rgba(46,204,113,0.15)", border: "1px solid var(--vert)", borderRadius: 8, padding: "10px 14px", color: "var(--vert)", fontSize: 13, marginBottom: 16 }}>{success}</div>}
+
             <button type="submit" disabled={loading} style={{ width: "100%", background: "var(--or)", color: "var(--bleu-nuit)", border: "none", borderRadius: 8, padding: "12px", fontWeight: 600, fontSize: 15, cursor: loading ? "not-allowed" : "pointer", opacity: loading ? 0.7 : 1 }}>
-              {loading ? "Connexion…" : "Se connecter"}
+              {loading ? (mode === "login" ? "Connexion…" : "Inscription…") : (mode === "login" ? "Se connecter" : "Créer mon compte")}
             </button>
           </form>
+
+          <div style={{ textAlign: "center", marginTop: 20, fontSize: 13, color: "var(--gris)" }}>
+            {mode === "login" ? (
+              <>Pas encore de compte ?{" "}<span onClick={() => switchMode("register")} style={{ color: "var(--or)", cursor: "pointer" }}>S'inscrire</span></>
+            ) : (
+              <>Déjà un compte ?{" "}<span onClick={() => switchMode("login")} style={{ color: "var(--or)", cursor: "pointer" }}>Se connecter</span></>
+            )}
+          </div>
+
         </div>
       </div>
     </>
