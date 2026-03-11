@@ -1,6 +1,6 @@
 import { Resend } from "resend";
 
-const resend = new Resend("re_PSco49LG_5RFGXJqRQZeQxrcZQAC42eJ1");
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 // Envoyer une relance pour impayé
 export async function envoyerRelance({ nom, prenom, email, montant, lot }) {

@@ -38,6 +38,7 @@ const styles = `
   .btn-primary:hover { background: var(--or-clair); transform: translateY(-1px); }
   .btn-secondary { background: var(--bleu-moyen); color: var(--blanc); }
   .btn-danger { background: rgba(231,76,60,0.2); color: var(--rouge); }
+  .btn-edit { background: rgba(52,152,219,0.15); color: var(--bleu); }
   .btn-sm { padding: 5px 12px; font-size: 12px; }
   .stats-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 16px; margin-bottom: 24px; }
   .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
@@ -78,6 +79,7 @@ const styles = `
   .list-content { flex: 1; min-width: 0; }
   .list-title { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .list-sub { font-size: 11px; color: var(--gris); margin-top: 2px; }
+  .list-actions { display: flex; gap: 6px; flex-shrink: 0; }
   .empty { text-align: center; padding: 40px 20px; color: var(--gris); }
   .empty-icon { font-size: 36px; margin-bottom: 10px; }
   .empty-text { font-size: 13px; }
@@ -173,12 +175,97 @@ function Dashboard() {
   );
 }
 
+function Residences({ showToast }) {
+  const [data, setData] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [modal, setModal] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const emptyForm = { nom: "", adresse: "", ville: "", code_postal: "", nb_lots: "" };
+  const [form, setForm] = useState(emptyForm);
+
+  async function load() {
+    const { data: r } = await supabase.from("residences").select("*").order("nom");
+    setData(r || []);
+    setLoading(false);
+  }
+  useEffect(() => { load(); }, []);
+
+  function openCreate() { setForm(emptyForm); setEditing(null); setModal(true); }
+  function openEdit(r) { setForm({ nom: r.nom, adresse: r.adresse, ville: r.ville, code_postal: r.code_postal || "", nb_lots: r.nb_lots || "" }); setEditing(r.id); setModal(true); }
+  function closeModal() { setModal(false); setEditing(null); setForm(emptyForm); }
+
+  async function save() {
+    if (!form.nom || !form.adresse || !form.ville) return showToast("Remplissez les champs obligatoires", "error");
+    const payload = { ...form, nb_lots: parseInt(form.nb_lots) || 0 };
+    const { error } = editing
+      ? await supabase.from("residences").update(payload).eq("id", editing)
+      : await supabase.from("residences").insert([payload]);
+    if (error) return showToast("Erreur : " + error.message, "error");
+    showToast(editing ? "Résidence mise à jour ✓" : "Résidence ajoutée ✓", "success");
+    closeModal(); load();
+  }
+
+  async function supprimer(id) {
+    if (!confirm("Supprimer cette résidence ?")) return;
+    await supabase.from("residences").delete().eq("id", id);
+    showToast("Supprimée", "success"); load();
+  }
+
+  if (loading) return <div className="loading">⏳ Chargement...</div>;
+
+  return (
+    <div>
+      <div className="topbar">
+        <div><div className="page-title">🏢 Résidences</div><div className="page-sub">{data.length} résidence(s) gérée(s)</div></div>
+        <button className="btn btn-primary" onClick={openCreate}>+ Ajouter</button>
+      </div>
+      <div className="grid-3">
+        {data.length === 0 ? (
+          <div className="empty"><div className="empty-icon">🏢</div><div className="empty-text">Aucune résidence</div></div>
+        ) : data.map(r => (
+          <div className="card" key={r.id}>
+            <div className="card-header">
+              <span className="card-title">🏢 {r.nom}</span>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button className="btn btn-edit btn-sm" onClick={() => openEdit(r)}>✏️</button>
+                <button className="btn btn-danger btn-sm" onClick={() => supprimer(r.id)}>🗑️</button>
+              </div>
+            </div>
+            <div style={{ fontSize: 13, color: "var(--gris)", lineHeight: 1.8 }}>
+              <div>📍 {r.adresse}</div>
+              <div>🏙️ {r.code_postal} {r.ville}</div>
+              <div>🔑 {r.nb_lots} lots</div>
+            </div>
+          </div>
+        ))}
+      </div>
+      {modal && (
+        <Modal title={editing ? "✏️ Modifier la résidence" : "🏢 Nouvelle résidence"} onClose={closeModal}>
+          <div className="form-group"><label className="form-label">Nom *</label><input className="form-input" placeholder="ex: Les Oliviers" value={form.nom} onChange={e => setForm({ ...form, nom: e.target.value })} /></div>
+          <div className="form-group"><label className="form-label">Adresse *</label><input className="form-input" placeholder="ex: 12 Avenue des Mimosas" value={form.adresse} onChange={e => setForm({ ...form, adresse: e.target.value })} /></div>
+          <div className="form-row">
+            <div className="form-group"><label className="form-label">Ville *</label><input className="form-input" value={form.ville} onChange={e => setForm({ ...form, ville: e.target.value })} /></div>
+            <div className="form-group"><label className="form-label">Code postal</label><input className="form-input" value={form.code_postal} onChange={e => setForm({ ...form, code_postal: e.target.value })} /></div>
+          </div>
+          <div className="form-group"><label className="form-label">Nombre de lots</label><input className="form-input" type="number" value={form.nb_lots} onChange={e => setForm({ ...form, nb_lots: e.target.value })} /></div>
+          <div className="modal-actions">
+            <button className="btn btn-secondary" onClick={closeModal}>Annuler</button>
+            <button className="btn btn-primary" onClick={save}>✅ {editing ? "Mettre à jour" : "Enregistrer"}</button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
 function Coproprietaires({ showToast }) {
   const [data, setData] = useState([]);
   const [residences, setResidences] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
-  const [form, setForm] = useState({ nom: "", prenom: "", email: "", telephone: "", lot: "", tantièmes: "", residence_id: "" });
+  const [editing, setEditing] = useState(null);
+  const emptyForm = { nom: "", prenom: "", email: "", telephone: "", lot: "", "tantièmes": "", residence_id: "" };
+  const [form, setForm] = useState(emptyForm);
 
   async function load() {
     const [c, r] = await Promise.all([supabase.from("coproprietaires").select("*, residences(nom)").order("nom"), supabase.from("residences").select("id, nom")]);
@@ -186,12 +273,22 @@ function Coproprietaires({ showToast }) {
   }
   useEffect(() => { load(); }, []);
 
+  function openCreate() { setForm(emptyForm); setEditing(null); setModal(true); }
+  function openEdit(c) {
+    setForm({ nom: c.nom, prenom: c.prenom, email: c.email || "", telephone: c.telephone || "", lot: c.lot || "", "tantièmes": c["tantièmes"] || "", residence_id: c.residence_id || "" });
+    setEditing(c.id); setModal(true);
+  }
+  function closeModal() { setModal(false); setEditing(null); setForm(emptyForm); }
+
   async function save() {
     if (!form.nom || !form.prenom || !form.email || !form.lot) return showToast("Remplissez tous les champs obligatoires", "error");
-    const { error } = await supabase.from("coproprietaires").insert([{ ...form, tantièmes: parseInt(form.tantièmes) || 0 }]);
+    const payload = { ...form, "tantièmes": parseInt(form["tantièmes"]) || 0 };
+    const { error } = editing
+      ? await supabase.from("coproprietaires").update(payload).eq("id", editing)
+      : await supabase.from("coproprietaires").insert([payload]);
     if (error) return showToast("Erreur : " + error.message, "error");
-    showToast("Copropriétaire ajouté ✓", "success"); setModal(false);
-    setForm({ nom: "", prenom: "", email: "", telephone: "", lot: "", tantièmes: "", residence_id: "" }); load();
+    showToast(editing ? "Copropriétaire mis à jour ✓" : "Copropriétaire ajouté ✓", "success");
+    closeModal(); load();
   }
 
   async function supprimer(id) {
@@ -203,16 +300,30 @@ function Coproprietaires({ showToast }) {
   if (loading) return <div className="loading">⏳ Chargement...</div>;
   return (
     <div>
-      <div className="topbar"><div><div className="page-title">👥 Copropriétaires</div><div className="page-sub">{data.length} propriétaire(s)</div></div><button className="btn btn-primary" onClick={() => setModal(true)}>+ Ajouter</button></div>
+      <div className="topbar"><div><div className="page-title">👥 Copropriétaires</div><div className="page-sub">{data.length} propriétaire(s)</div></div><button className="btn btn-primary" onClick={openCreate}>+ Ajouter</button></div>
       <div className="card">
         {data.length === 0 ? <div className="empty"><div className="empty-icon">👤</div><div className="empty-text">Aucun copropriétaire</div></div> : (
           <div className="table-wrap"><table>
             <thead><tr><th>Nom</th><th>Lot</th><th>Email</th><th>Résidence</th><th>Tantièmes</th><th></th></tr></thead>
-            <tbody>{data.map(c => <tr key={c.id}><td><strong>{c.prenom} {c.nom}</strong></td><td style={{ color: "var(--or-clair)" }}>{c.lot}</td><td style={{ color: "var(--gris)" }}>{c.email}</td><td>{c.residences?.nom || "—"}</td><td>{c.tantièmes}</td><td><button className="btn btn-danger btn-sm" onClick={() => supprimer(c.id)}>🗑️</button></td></tr>)}</tbody>
+            <tbody>{data.map(c => (
+              <tr key={c.id}>
+                <td><strong>{c.prenom} {c.nom}</strong></td>
+                <td style={{ color: "var(--or-clair)" }}>{c.lot}</td>
+                <td style={{ color: "var(--gris)" }}>{c.email}</td>
+                <td>{c.residences?.nom || "—"}</td>
+                <td>{c["tantièmes"]}</td>
+                <td>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button className="btn btn-edit btn-sm" onClick={() => openEdit(c)}>✏️</button>
+                    <button className="btn btn-danger btn-sm" onClick={() => supprimer(c.id)}>🗑️</button>
+                  </div>
+                </td>
+              </tr>
+            ))}</tbody>
           </table></div>
         )}
       </div>
-      {modal && <Modal title="➕ Nouveau copropriétaire" onClose={() => setModal(false)}>
+      {modal && <Modal title={editing ? "✏️ Modifier le copropriétaire" : "➕ Nouveau copropriétaire"} onClose={closeModal}>
         <div className="form-row">
           <div className="form-group"><label className="form-label">Prénom *</label><input className="form-input" value={form.prenom} onChange={e => setForm({ ...form, prenom: e.target.value })} /></div>
           <div className="form-group"><label className="form-label">Nom *</label><input className="form-input" value={form.nom} onChange={e => setForm({ ...form, nom: e.target.value })} /></div>
@@ -223,7 +334,7 @@ function Coproprietaires({ showToast }) {
           <div className="form-group"><label className="form-label">Lot *</label><input className="form-input" value={form.lot} onChange={e => setForm({ ...form, lot: e.target.value })} /></div>
         </div>
         <div className="form-row">
-          <div className="form-group"><label className="form-label">Tantièmes</label><input className="form-input" type="number" value={form.tantièmes} onChange={e => setForm({ ...form, tantièmes: e.target.value })} /></div>
+          <div className="form-group"><label className="form-label">Tantièmes</label><input className="form-input" type="number" value={form["tantièmes"]} onChange={e => setForm({ ...form, "tantièmes": e.target.value })} /></div>
           <div className="form-group"><label className="form-label">Résidence</label>
             <select className="form-input" value={form.residence_id} onChange={e => setForm({ ...form, residence_id: e.target.value })}>
               <option value="">Sélectionner...</option>
@@ -231,7 +342,7 @@ function Coproprietaires({ showToast }) {
             </select>
           </div>
         </div>
-        <div className="modal-actions"><button className="btn btn-secondary" onClick={() => setModal(false)}>Annuler</button><button className="btn btn-primary" onClick={save}>✅ Enregistrer</button></div>
+        <div className="modal-actions"><button className="btn btn-secondary" onClick={closeModal}>Annuler</button><button className="btn btn-primary" onClick={save}>✅ {editing ? "Mettre à jour" : "Enregistrer"}</button></div>
       </Modal>}
     </div>
   );
@@ -245,52 +356,82 @@ function Charges({ showToast }) {
   const [loading, setLoading] = useState(true);
   const [modalCharge, setModalCharge] = useState(false);
   const [modalPaiement, setModalPaiement] = useState(false);
-  const [formCharge, setFormCharge] = useState({ titre: "", montant_total: "", date_echeance: "", residence_id: "", trimestre: "" });
-  const [formPaiement, setFormPaiement] = useState({ charge_id: "", coproprietaire_id: "", montant: "", statut: "paye", mode_paiement: "virement", date_paiement: new Date().toISOString().split("T")[0] });
+  const [editingCharge, setEditingCharge] = useState(null);
+  const [editingPaiement, setEditingPaiement] = useState(null);
+  const emptyCharge = { titre: "", montant_total: "", date_echeance: "", residence_id: "", trimestre: "" };
+  const emptyPaiement = { charge_id: "", coproprietaire_id: "", montant: "", statut: "paye", mode_paiement: "virement", date_paiement: new Date().toISOString().split("T")[0] };
+  const [formCharge, setFormCharge] = useState(emptyCharge);
+  const [formPaiement, setFormPaiement] = useState(emptyPaiement);
 
   async function load() {
     const [ch, p, c, r] = await Promise.all([
       supabase.from("charges").select("*, residences(nom)").order("date_echeance", { ascending: false }),
-      supabase.from("paiements").select("*, coproprietaires(nom, prenom, lot), charges(titre)").order("created_at", { ascending: false }),
-      supabase.from("coproprietaires").select("id, nom, prenom, lot"),
+      supabase.from("paiements").select("*, coproprietaires(nom, prenom, email, lot), charges(titre)").order("created_at", { ascending: false }),
+      supabase.from("coproprietaires").select("id, nom, prenom, lot, email"),
       supabase.from("residences").select("id, nom"),
     ]);
     setCharges(ch.data || []); setPaiements(p.data || []); setCopros(c.data || []); setResidences(r.data || []); setLoading(false);
   }
   useEffect(() => { load(); }, []);
 
+  function openCreateCharge() { setFormCharge(emptyCharge); setEditingCharge(null); setModalCharge(true); }
+  function openEditCharge(c) {
+    setFormCharge({ titre: c.titre, montant_total: c.montant_total, date_echeance: c.date_echeance || "", residence_id: c.residence_id || "", trimestre: c.trimestre || "" });
+    setEditingCharge(c.id); setModalCharge(true);
+  }
+  function closeModalCharge() { setModalCharge(false); setEditingCharge(null); setFormCharge(emptyCharge); }
+
+  function openCreatePaiement() { setFormPaiement(emptyPaiement); setEditingPaiement(null); setModalPaiement(true); }
+  function openEditPaiement(p) {
+    setFormPaiement({ charge_id: p.charge_id, coproprietaire_id: p.coproprietaire_id, montant: p.montant, statut: p.statut, mode_paiement: p.mode_paiement || "virement", date_paiement: p.date_paiement || new Date().toISOString().split("T")[0] });
+    setEditingPaiement(p.id); setModalPaiement(true);
+  }
+  function closeModalPaiement() { setModalPaiement(false); setEditingPaiement(null); setFormPaiement(emptyPaiement); }
+
   async function saveCharge() {
     if (!formCharge.titre || !formCharge.montant_total) return showToast("Champs obligatoires manquants", "error");
-    const { error } = await supabase.from("charges").insert([{ ...formCharge, montant_total: parseFloat(formCharge.montant_total) }]);
+    const payload = { ...formCharge, montant_total: parseFloat(formCharge.montant_total) };
+    const { error } = editingCharge
+      ? await supabase.from("charges").update(payload).eq("id", editingCharge)
+      : await supabase.from("charges").insert([payload]);
     if (error) return showToast("Erreur : " + error.message, "error");
-    showToast("Charge ajoutée ✓", "success"); setModalCharge(false);
-    setFormCharge({ titre: "", montant_total: "", date_echeance: "", residence_id: "", trimestre: "" }); load();
+    showToast(editingCharge ? "Appel de fonds mis à jour ✓" : "Charge ajoutée ✓", "success");
+    closeModalCharge(); load();
+  }
+
+  async function supprimerCharge(id) {
+    if (!confirm("Supprimer cet appel de fonds ?")) return;
+    await supabase.from("charges").delete().eq("id", id);
+    showToast("Supprimé", "success"); load();
   }
 
   async function savePaiement() {
     if (!formPaiement.charge_id || !formPaiement.coproprietaire_id || !formPaiement.montant) return showToast("Remplissez tous les champs", "error");
-    const { error } = await supabase.from("paiements").insert([{ ...formPaiement, montant: parseFloat(formPaiement.montant) }]);
+    const payload = { ...formPaiement, montant: parseFloat(formPaiement.montant) };
+    const { error } = editingPaiement
+      ? await supabase.from("paiements").update(payload).eq("id", editingPaiement)
+      : await supabase.from("paiements").insert([payload]);
     if (error) return showToast("Erreur : " + error.message, "error");
-    showToast("Paiement enregistré ✓", "success"); setModalPaiement(false); load();
-    try {
-  await fetch("/api/envoyer-email", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      type: "recu",
-      destinataire: copros.find(c => c.id === formPaiement.coproprietaire_id)?.email,
-      donnees: {
-        nom: copros.find(c => c.id === formPaiement.coproprietaire_id)?.nom,
-        prenom: copros.find(c => c.id === formPaiement.coproprietaire_id)?.prenom,
-        lot: copros.find(c => c.id === formPaiement.coproprietaire_id)?.lot,
-        montant: formPaiement.montant,
-        date: formPaiement.date_paiement,
-      },
-    }),
-  });
-} catch (e) {
-  console.log("Email non envoyé", e);
-}
+    showToast(editingPaiement ? "Paiement mis à jour ✓" : "Paiement enregistré ✓", "success");
+    closeModalPaiement(); load();
+    if (!editingPaiement) {
+      try {
+        const copro = copros.find(c => c.id === formPaiement.coproprietaire_id);
+        if (copro?.email) {
+          await fetch("/api/envoyer-email", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ type: "recu", destinataire: copro.email, donnees: { nom: copro.nom, prenom: copro.prenom, lot: copro.lot, montant: formPaiement.montant, date: formPaiement.date_paiement } }),
+          });
+        }
+      } catch (e) { console.log("Email non envoyé", e); }
+    }
+  }
+
+  async function supprimerPaiement(id) {
+    if (!confirm("Supprimer ce paiement ?")) return;
+    await supabase.from("paiements").delete().eq("id", id);
+    showToast("Supprimé", "success"); load();
   }
 
   if (loading) return <div className="loading">⏳ Chargement...</div>;
@@ -299,28 +440,56 @@ function Charges({ showToast }) {
       <div className="topbar">
         <div><div className="page-title">💰 Charges & Paiements</div><div className="page-sub">{charges.length} appel(s) · {paiements.length} paiement(s)</div></div>
         <div style={{ display: "flex", gap: 10 }}>
-          <button className="btn btn-secondary" onClick={() => setModalCharge(true)}>+ Appel de fonds</button>
-          <button className="btn btn-primary" onClick={() => setModalPaiement(true)}>+ Paiement</button>
+          <button className="btn btn-secondary" onClick={openCreateCharge}>+ Appel de fonds</button>
+          <button className="btn btn-primary" onClick={openCreatePaiement}>+ Paiement</button>
         </div>
       </div>
       <div className="grid-2">
         <div className="card">
           <div className="card-header"><span className="card-title">📋 Appels de fonds</span></div>
           {charges.length === 0 ? <div className="empty"><div className="empty-icon">📄</div><div className="empty-text">Aucun appel de fonds</div></div> :
-            charges.map(c => <div className="list-item" key={c.id}><div className="list-icon">💰</div><div className="list-content"><div className="list-title">{c.titre}</div><div className="list-sub">{c.residences?.nom} · {c.date_echeance}</div></div><div style={{ color: "var(--or-clair)", fontWeight: 600 }}>{c.montant_total} €</div></div>)
+            charges.map(c => (
+              <div className="list-item" key={c.id}>
+                <div className="list-icon">💰</div>
+                <div className="list-content"><div className="list-title">{c.titre}</div><div className="list-sub">{c.residences?.nom} · {c.date_echeance}</div></div>
+                <div style={{ color: "var(--or-clair)", fontWeight: 600, marginRight: 8 }}>{c.montant_total} €</div>
+                <div className="list-actions">
+                  <button className="btn btn-edit btn-sm" onClick={() => openEditCharge(c)}>✏️</button>
+                  <button className="btn btn-danger btn-sm" onClick={() => supprimerCharge(c.id)}>🗑️</button>
+                </div>
+              </div>
+            ))
           }
         </div>
         <div className="card">
           <div className="card-header"><span className="card-title">💳 Paiements</span></div>
           {paiements.length === 0 ? <div className="empty"><div className="empty-icon">💳</div><div className="empty-text">Aucun paiement</div></div> : (
             <div className="table-wrap"><table>
-              <thead><tr><th>Copropriétaire</th><th>Montant</th><th>Statut</th></tr></thead>
-              <tbody>{paiements.map(p => <tr key={p.id}><td>{p.coproprietaires ? `${p.coproprietaires.prenom} ${p.coproprietaires.nom}` : "—"}</td><td style={{ color: "var(--or-clair)", fontWeight: 600 }}>{p.montant} €</td><td><Badge statut={p.statut} /></td><td><button className="btn btn-danger btn-sm" onClick={async () => { const copro = p.coproprietaires; if (!copro?.email) return showToast("Email manquant", "error"); await fetch("/api/envoyer-email", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "relance", destinataire: copro.email, donnees: { nom: copro.nom, prenom: copro.prenom, lot: copro.lot, montant: p.montant } }) }); showToast("Relance envoyée ✓", "success"); }}>📧 Relance</button></td></tr>)}</tbody>
+              <thead><tr><th>Copropriétaire</th><th>Montant</th><th>Statut</th><th></th></tr></thead>
+              <tbody>{paiements.map(p => (
+                <tr key={p.id}>
+                  <td>{p.coproprietaires ? `${p.coproprietaires.prenom} ${p.coproprietaires.nom}` : "—"}</td>
+                  <td style={{ color: "var(--or-clair)", fontWeight: 600 }}>{p.montant} €</td>
+                  <td><Badge statut={p.statut} /></td>
+                  <td>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button className="btn btn-edit btn-sm" onClick={() => openEditPaiement(p)}>✏️</button>
+                      <button className="btn btn-danger btn-sm" onClick={async () => {
+                        const copro = p.coproprietaires;
+                        if (!copro?.email) return showToast("Email manquant", "error");
+                        await fetch("/api/envoyer-email", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "relance", destinataire: copro.email, donnees: { nom: copro.nom, prenom: copro.prenom, lot: copro.lot, montant: p.montant } }) });
+                        showToast("Relance envoyée ✓", "success");
+                      }}>📧 Relance</button>
+                      <button className="btn btn-danger btn-sm" onClick={() => supprimerPaiement(p.id)}>🗑️</button>
+                    </div>
+                  </td>
+                </tr>
+              ))}</tbody>
             </table></div>
           )}
         </div>
       </div>
-      {modalCharge && <Modal title="📋 Nouvel appel de fonds" onClose={() => setModalCharge(false)}>
+      {modalCharge && <Modal title={editingCharge ? "✏️ Modifier l'appel de fonds" : "📋 Nouvel appel de fonds"} onClose={closeModalCharge}>
         <div className="form-group"><label className="form-label">Titre *</label><input className="form-input" value={formCharge.titre} onChange={e => setFormCharge({ ...formCharge, titre: e.target.value })} /></div>
         <div className="form-row">
           <div className="form-group"><label className="form-label">Montant *</label><input className="form-input" type="number" value={formCharge.montant_total} onChange={e => setFormCharge({ ...formCharge, montant_total: e.target.value })} /></div>
@@ -332,9 +501,9 @@ function Charges({ showToast }) {
             {residences.map(r => <option key={r.id} value={r.id}>{r.nom}</option>)}
           </select>
         </div>
-        <div className="modal-actions"><button className="btn btn-secondary" onClick={() => setModalCharge(false)}>Annuler</button><button className="btn btn-primary" onClick={saveCharge}>✅ Créer</button></div>
+        <div className="modal-actions"><button className="btn btn-secondary" onClick={closeModalCharge}>Annuler</button><button className="btn btn-primary" onClick={saveCharge}>✅ {editingCharge ? "Mettre à jour" : "Créer"}</button></div>
       </Modal>}
-      {modalPaiement && <Modal title="💳 Enregistrer un paiement" onClose={() => setModalPaiement(false)}>
+      {modalPaiement && <Modal title={editingPaiement ? "✏️ Modifier le paiement" : "💳 Enregistrer un paiement"} onClose={closeModalPaiement}>
         <div className="form-group"><label className="form-label">Appel de fonds *</label>
           <select className="form-input" value={formPaiement.charge_id} onChange={e => setFormPaiement({ ...formPaiement, charge_id: e.target.value })}>
             <option value="">Sélectionner...</option>
@@ -363,7 +532,7 @@ function Charges({ showToast }) {
             </select>
           </div>
         </div>
-        <div className="modal-actions"><button className="btn btn-secondary" onClick={() => setModalPaiement(false)}>Annuler</button><button className="btn btn-primary" onClick={savePaiement}>✅ Enregistrer</button></div>
+        <div className="modal-actions"><button className="btn btn-secondary" onClick={closeModalPaiement}>Annuler</button><button className="btn btn-primary" onClick={savePaiement}>✅ {editingPaiement ? "Mettre à jour" : "Enregistrer"}</button></div>
       </Modal>}
     </div>
   );
@@ -374,7 +543,9 @@ function Travaux({ showToast }) {
   const [residences, setResidences] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
-  const [form, setForm] = useState({ titre: "", description: "", prestataire: "", montant: "", date_debut: "", date_fin_prevue: "", statut: "planifie", urgence: false, residence_id: "" });
+  const [editing, setEditing] = useState(null);
+  const emptyForm = { titre: "", description: "", prestataire: "", montant: "", date_debut: "", date_fin_prevue: "", statut: "planifie", urgence: false, residence_id: "" };
+  const [form, setForm] = useState(emptyForm);
 
   async function load() {
     const [t, r] = await Promise.all([supabase.from("travaux").select("*, residences(nom)").order("created_at", { ascending: false }), supabase.from("residences").select("id, nom")]);
@@ -382,18 +553,34 @@ function Travaux({ showToast }) {
   }
   useEffect(() => { load(); }, []);
 
+  function openCreate() { setForm(emptyForm); setEditing(null); setModal(true); }
+  function openEdit(t) {
+    setForm({ titre: t.titre, description: t.description || "", prestataire: t.prestataire || "", montant: t.montant || "", date_debut: t.date_debut || "", date_fin_prevue: t.date_fin_prevue || "", statut: t.statut, urgence: t.urgence || false, residence_id: t.residence_id || "" });
+    setEditing(t.id); setModal(true);
+  }
+  function closeModal() { setModal(false); setEditing(null); setForm(emptyForm); }
+
   async function save() {
     if (!form.titre) return showToast("Le titre est obligatoire", "error");
-    const { error } = await supabase.from("travaux").insert([{ ...form, montant: form.montant ? parseFloat(form.montant) : null }]);
+    const payload = { ...form, montant: form.montant ? parseFloat(form.montant) : null };
+    const { error } = editing
+      ? await supabase.from("travaux").update(payload).eq("id", editing)
+      : await supabase.from("travaux").insert([payload]);
     if (error) return showToast("Erreur : " + error.message, "error");
-    showToast("Travaux ajoutés ✓", "success"); setModal(false);
-    setForm({ titre: "", description: "", prestataire: "", montant: "", date_debut: "", date_fin_prevue: "", statut: "planifie", urgence: false, residence_id: "" }); load();
+    showToast(editing ? "Travaux mis à jour ✓" : "Travaux ajoutés ✓", "success");
+    closeModal(); load();
+  }
+
+  async function supprimer(id) {
+    if (!confirm("Supprimer ce chantier ?")) return;
+    await supabase.from("travaux").delete().eq("id", id);
+    showToast("Supprimé", "success"); load();
   }
 
   if (loading) return <div className="loading">⏳ Chargement...</div>;
   return (
     <div>
-      <div className="topbar"><div><div className="page-title">🔧 Travaux & Prestataires</div><div className="page-sub">{data.length} intervention(s)</div></div><button className="btn btn-primary" onClick={() => setModal(true)}>+ Nouveau chantier</button></div>
+      <div className="topbar"><div><div className="page-title">🔧 Travaux & Prestataires</div><div className="page-sub">{data.length} intervention(s)</div></div><button className="btn btn-primary" onClick={openCreate}>+ Nouveau chantier</button></div>
       <div className="grid-3">
         {["planifie", "en_cours", "termine"].map(statut => (
           <div className="card" key={statut}>
@@ -402,13 +589,17 @@ function Travaux({ showToast }) {
               data.filter(t => t.statut === statut).map(t => (
                 <div className="list-item" key={t.id} style={{ borderLeft: `3px solid ${t.urgence ? "var(--rouge)" : "transparent"}` }}>
                   <div className="list-content"><div className="list-title">{t.urgence ? "🚨 " : ""}{t.titre}</div><div className="list-sub">{t.prestataire || "—"}{t.montant ? ` · ${t.montant} €` : ""}</div></div>
+                  <div className="list-actions">
+                    <button className="btn btn-edit btn-sm" onClick={() => openEdit(t)}>✏️</button>
+                    <button className="btn btn-danger btn-sm" onClick={() => supprimer(t.id)}>🗑️</button>
+                  </div>
                 </div>
               ))
             }
           </div>
         ))}
       </div>
-      {modal && <Modal title="🔧 Nouveau chantier" onClose={() => setModal(false)}>
+      {modal && <Modal title={editing ? "✏️ Modifier le chantier" : "🔧 Nouveau chantier"} onClose={closeModal}>
         <div className="form-group"><label className="form-label">Titre *</label><input className="form-input" value={form.titre} onChange={e => setForm({ ...form, titre: e.target.value })} /></div>
         <div className="form-group"><label className="form-label">Description</label><textarea className="form-input" rows={2} value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} /></div>
         <div className="form-row">
@@ -436,94 +627,20 @@ function Travaux({ showToast }) {
           <input type="checkbox" id="urgence" checked={form.urgence} onChange={e => setForm({ ...form, urgence: e.target.checked })} style={{ width: 16, height: 16 }} />
           <label htmlFor="urgence" style={{ fontSize: 13, color: "var(--rouge)", cursor: "pointer" }}>🚨 Urgent</label>
         </div>
-        <div className="modal-actions"><button className="btn btn-secondary" onClick={() => setModal(false)}>Annuler</button><button className="btn btn-primary" onClick={save}>✅ Enregistrer</button></div>
+        <div className="modal-actions"><button className="btn btn-secondary" onClick={closeModal}>Annuler</button><button className="btn btn-primary" onClick={save}>✅ {editing ? "Mettre à jour" : "Enregistrer"}</button></div>
       </Modal>}
     </div>
   );
 }
-function Residences({ showToast }) {
-  const [data, setData] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [modal, setModal] = useState(false);
-  const [form, setForm] = useState({ nom: "", adresse: "", ville: "", code_postal: "", nb_lots: "" });
 
-  async function load() {
-    const { data: r } = await supabase.from("residences").select("*").order("nom");
-    setData(r || []);
-    setLoading(false);
-  }
-
-  useEffect(() => { load(); }, []);
-
-  async function save() {
-    if (!form.nom || !form.adresse || !form.ville) return showToast("Remplissez les champs obligatoires", "error");
-    const { error } = await supabase.from("residences").insert([{ ...form, nb_lots: parseInt(form.nb_lots) || 0 }]);
-    if (error) return showToast("Erreur : " + error.message, "error");
-    showToast("Résidence ajoutée ✓", "success");
-    setModal(false);
-    setForm({ nom: "", adresse: "", ville: "", code_postal: "", nb_lots: "" });
-    load();
-  }
-
-  async function supprimer(id) {
-    if (!confirm("Supprimer cette résidence ?")) return;
-    await supabase.from("residences").delete().eq("id", id);
-    showToast("Supprimée", "success");
-    load();
-  }
-
-  if (loading) return <div className="loading">⏳ Chargement...</div>;
-
-  return (
-    <div>
-      <div className="topbar">
-        <div>
-          <div className="page-title">🏢 Résidences</div>
-          <div className="page-sub">{data.length} résidence(s) gérée(s)</div>
-        </div>
-        <button className="btn btn-primary" onClick={() => setModal(true)}>+ Ajouter</button>
-      </div>
-      <div className="grid-3">
-        {data.length === 0 ? (
-          <div className="empty"><div className="empty-icon">🏢</div><div className="empty-text">Aucune résidence</div></div>
-        ) : data.map(r => (
-          <div className="card" key={r.id}>
-            <div className="card-header">
-              <span className="card-title">🏢 {r.nom}</span>
-              <button className="btn btn-danger btn-sm" onClick={() => supprimer(r.id)}>🗑️</button>
-            </div>
-            <div style={{ fontSize: 13, color: "var(--gris)", lineHeight: 1.8 }}>
-              <div>📍 {r.adresse}</div>
-              <div>🏙️ {r.code_postal} {r.ville}</div>
-              <div>🔑 {r.nb_lots} lots</div>
-            </div>
-          </div>
-        ))}
-      </div>
-      {modal && (
-        <Modal title="🏢 Nouvelle résidence" onClose={() => setModal(false)}>
-          <div className="form-group"><label className="form-label">Nom *</label><input className="form-input" placeholder="ex: Les Oliviers" value={form.nom} onChange={e => setForm({ ...form, nom: e.target.value })} /></div>
-          <div className="form-group"><label className="form-label">Adresse *</label><input className="form-input" placeholder="ex: 12 Avenue des Mimosas" value={form.adresse} onChange={e => setForm({ ...form, adresse: e.target.value })} /></div>
-          <div className="form-row">
-            <div className="form-group"><label className="form-label">Ville *</label><input className="form-input" value={form.ville} onChange={e => setForm({ ...form, ville: e.target.value })} /></div>
-            <div className="form-group"><label className="form-label">Code postal</label><input className="form-input" value={form.code_postal} onChange={e => setForm({ ...form, code_postal: e.target.value })} /></div>
-          </div>
-          <div className="form-group"><label className="form-label">Nombre de lots</label><input className="form-input" type="number" value={form.nb_lots} onChange={e => setForm({ ...form, nb_lots: e.target.value })} /></div>
-          <div className="modal-actions">
-            <button className="btn btn-secondary" onClick={() => setModal(false)}>Annuler</button>
-            <button className="btn btn-primary" onClick={save}>✅ Enregistrer</button>
-          </div>
-        </Modal>
-      )}
-    </div>
-  );
-}
 function Assemblees({ showToast }) {
   const [data, setData] = useState([]);
   const [residences, setResidences] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
-  const [form, setForm] = useState({ titre: "", date_ag: "", lieu: "", type_ag: "ordinaire", statut: "planifiee", residence_id: "" });
+  const [editing, setEditing] = useState(null);
+  const emptyForm = { titre: "", date_ag: "", lieu: "", type_ag: "ordinaire", statut: "planifiee", residence_id: "" };
+  const [form, setForm] = useState(emptyForm);
 
   async function load() {
     const [a, r] = await Promise.all([supabase.from("assemblees").select("*, residences(nom)").order("date_ag", { ascending: false }), supabase.from("residences").select("id, nom")]);
@@ -531,18 +648,33 @@ function Assemblees({ showToast }) {
   }
   useEffect(() => { load(); }, []);
 
+  function openCreate() { setForm(emptyForm); setEditing(null); setModal(true); }
+  function openEdit(a) {
+    setForm({ titre: a.titre, date_ag: a.date_ag ? a.date_ag.slice(0, 16) : "", lieu: a.lieu || "", type_ag: a.type_ag, statut: a.statut, residence_id: a.residence_id || "" });
+    setEditing(a.id); setModal(true);
+  }
+  function closeModal() { setModal(false); setEditing(null); setForm(emptyForm); }
+
   async function save() {
     if (!form.titre || !form.date_ag) return showToast("Titre et date obligatoires", "error");
-    const { error } = await supabase.from("assemblees").insert([form]);
+    const { error } = editing
+      ? await supabase.from("assemblees").update(form).eq("id", editing)
+      : await supabase.from("assemblees").insert([form]);
     if (error) return showToast("Erreur : " + error.message, "error");
-    showToast("AG planifiée ✓", "success"); setModal(false);
-    setForm({ titre: "", date_ag: "", lieu: "", type_ag: "ordinaire", statut: "planifiee", residence_id: "" }); load();
+    showToast(editing ? "AG mise à jour ✓" : "AG planifiée ✓", "success");
+    closeModal(); load();
+  }
+
+  async function supprimer(id) {
+    if (!confirm("Supprimer cette AG ?")) return;
+    await supabase.from("assemblees").delete().eq("id", id);
+    showToast("Supprimée", "success"); load();
   }
 
   if (loading) return <div className="loading">⏳ Chargement...</div>;
   return (
     <div>
-      <div className="topbar"><div><div className="page-title">📋 Assemblées Générales</div><div className="page-sub">{data.length} AG enregistrée(s)</div></div><button className="btn btn-primary" onClick={() => setModal(true)}>+ Planifier une AG</button></div>
+      <div className="topbar"><div><div className="page-title">📋 Assemblées Générales</div><div className="page-sub">{data.length} AG enregistrée(s)</div></div><button className="btn btn-primary" onClick={openCreate}>+ Planifier une AG</button></div>
       <div className="card">
         {data.length === 0 ? <div className="empty"><div className="empty-icon">📋</div><div className="empty-text">Aucune AG planifiée</div></div> :
           data.map(a => (
@@ -552,12 +684,16 @@ function Assemblees({ showToast }) {
                 <div className="list-title">{a.titre}</div>
                 <div className="list-sub">{a.date_ag ? new Date(a.date_ag).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" }) : "—"}{a.lieu ? ` · 📍 ${a.lieu}` : ""} · {a.residences?.nom}</div>
               </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}><Badge statut={a.statut} /><Badge statut={a.type_ag} /></div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end", marginRight: 8 }}><Badge statut={a.statut} /><Badge statut={a.type_ag} /></div>
+              <div className="list-actions">
+                <button className="btn btn-edit btn-sm" onClick={() => openEdit(a)}>✏️</button>
+                <button className="btn btn-danger btn-sm" onClick={() => supprimer(a.id)}>🗑️</button>
+              </div>
             </div>
           ))
         }
       </div>
-      {modal && <Modal title="📋 Planifier une AG" onClose={() => setModal(false)}>
+      {modal && <Modal title={editing ? "✏️ Modifier l'AG" : "📋 Planifier une AG"} onClose={closeModal}>
         <div className="form-group"><label className="form-label">Titre *</label><input className="form-input" value={form.titre} onChange={e => setForm({ ...form, titre: e.target.value })} /></div>
         <div className="form-row">
           <div className="form-group"><label className="form-label">Date & heure *</label><input className="form-input" type="datetime-local" value={form.date_ag} onChange={e => setForm({ ...form, date_ag: e.target.value })} /></div>
@@ -569,14 +705,19 @@ function Assemblees({ showToast }) {
               <option value="ordinaire">Ordinaire</option><option value="extraordinaire">Extraordinaire</option>
             </select>
           </div>
-          <div className="form-group"><label className="form-label">Résidence</label>
-            <select className="form-input" value={form.residence_id} onChange={e => setForm({ ...form, residence_id: e.target.value })}>
-              <option value="">Sélectionner...</option>
-              {residences.map(r => <option key={r.id} value={r.id}>{r.nom}</option>)}
+          <div className="form-group"><label className="form-label">Statut</label>
+            <select className="form-input" value={form.statut} onChange={e => setForm({ ...form, statut: e.target.value })}>
+              <option value="planifiee">Planifiée</option><option value="tenue">Tenue</option>
             </select>
           </div>
         </div>
-        <div className="modal-actions"><button className="btn btn-secondary" onClick={() => setModal(false)}>Annuler</button><button className="btn btn-primary" onClick={save}>✅ Planifier</button></div>
+        <div className="form-group"><label className="form-label">Résidence</label>
+          <select className="form-input" value={form.residence_id} onChange={e => setForm({ ...form, residence_id: e.target.value })}>
+            <option value="">Sélectionner...</option>
+            {residences.map(r => <option key={r.id} value={r.id}>{r.nom}</option>)}
+          </select>
+        </div>
+        <div className="modal-actions"><button className="btn btn-secondary" onClick={closeModal}>Annuler</button><button className="btn btn-primary" onClick={save}>✅ {editing ? "Mettre à jour" : "Planifier"}</button></div>
       </Modal>}
     </div>
   );
@@ -586,7 +727,7 @@ export default function App() {
   const [page, setPage] = useState("dashboard");
   const [toast, setToast] = useState(null);
   function showToast(message, type = "success") { setToast({ message, type }); }
-const pages = {
+  const pages = {
     dashboard: <Dashboard />,
     residences: <Residences showToast={showToast} />,
     coproprietaires: <Coproprietaires showToast={showToast} />,
@@ -622,4 +763,3 @@ const pages = {
     </>
   );
 }
-

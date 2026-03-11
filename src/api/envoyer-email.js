@@ -1,21 +1,16 @@
 const { Resend } = require("resend");
-
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 module.exports = async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Méthode non autorisée" });
   }
-
   const { type, destinataire, donnees } = req.body;
-
   if (!destinataire) {
     return res.status(400).json({ error: "Email manquant" });
   }
-
   try {
     let emailData;
-
     if (type === "relance") {
       emailData = {
         from: "SyndicPro <onboarding@resend.dev>",
@@ -33,7 +28,6 @@ module.exports = async function handler(req, res) {
         `,
       };
     }
-
     if (type === "recu") {
       emailData = {
         from: "SyndicPro <onboarding@resend.dev>",
@@ -50,7 +44,6 @@ module.exports = async function handler(req, res) {
         `,
       };
     }
-
     if (type === "convocation") {
       emailData = {
         from: "SyndicPro <onboarding@resend.dev>",
@@ -71,28 +64,9 @@ module.exports = async function handler(req, res) {
         `,
       };
     }
-
     const data = await resend.emails.send(emailData);
     return res.status(200).json({ success: true, data });
-
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }
 };
-```
-
-Sauvegardez avec **Ctrl + S** puis déployez :
-
-**1.**
-```
-git add .
-```
-
-**2.**
-```
-git commit -m "Fix backend email CommonJS"
-```
-
-**3.**
-```
-git push
