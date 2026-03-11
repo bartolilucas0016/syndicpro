@@ -179,7 +179,7 @@ function Dashboard() {
   );
 }
 
-function Residences({ showToast }) {
+function Residences({ showToast, userId }) {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
@@ -203,7 +203,7 @@ function Residences({ showToast }) {
     const payload = { ...form, nb_lots: parseInt(form.nb_lots) || 0 };
     const { error } = editing
       ? await supabase.from("residences").update(payload).eq("id", editing)
-      : await supabase.from("residences").insert([payload]);
+      : await supabase.from("residences").insert([{ ...payload, user_id: userId }]);
     if (error) return showToast("Erreur : " + error.message, "error");
     showToast(editing ? "Résidence mise à jour ✓" : "Résidence ajoutée ✓", "success");
     closeModal(); load();
@@ -262,7 +262,7 @@ function Residences({ showToast }) {
   );
 }
 
-function Coproprietaires({ showToast }) {
+function Coproprietaires({ showToast, userId }) {
   const [data, setData] = useState([]);
   const [residences, setResidences] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -289,7 +289,7 @@ function Coproprietaires({ showToast }) {
     const payload = { ...form, "tantièmes": parseInt(form["tantièmes"]) || 0 };
     const { error } = editing
       ? await supabase.from("coproprietaires").update(payload).eq("id", editing)
-      : await supabase.from("coproprietaires").insert([payload]);
+      : await supabase.from("coproprietaires").insert([{ ...payload, user_id: userId }]);
     if (error) return showToast("Erreur : " + error.message, "error");
     showToast(editing ? "Copropriétaire mis à jour ✓" : "Copropriétaire ajouté ✓", "success");
     closeModal(); load();
@@ -352,7 +352,7 @@ function Coproprietaires({ showToast }) {
   );
 }
 
-function Charges({ showToast }) {
+function Charges({ showToast, userId }) {
   const [charges, setCharges] = useState([]);
   const [paiements, setPaiements] = useState([]);
   const [copros, setCopros] = useState([]);
@@ -397,7 +397,7 @@ function Charges({ showToast }) {
     const payload = { ...formCharge, montant_total: parseFloat(formCharge.montant_total) };
     const { error } = editingCharge
       ? await supabase.from("charges").update(payload).eq("id", editingCharge)
-      : await supabase.from("charges").insert([payload]);
+      : await supabase.from("charges").insert([{ ...payload, user_id: userId }]);
     if (error) return showToast("Erreur : " + error.message, "error");
     showToast(editingCharge ? "Appel de fonds mis à jour ✓" : "Charge ajoutée ✓", "success");
     closeModalCharge(); load();
@@ -414,7 +414,7 @@ function Charges({ showToast }) {
     const payload = { ...formPaiement, montant: parseFloat(formPaiement.montant) };
     const { error } = editingPaiement
       ? await supabase.from("paiements").update(payload).eq("id", editingPaiement)
-      : await supabase.from("paiements").insert([payload]);
+      : await supabase.from("paiements").insert([{ ...payload, user_id: userId }]);
     if (error) return showToast("Erreur : " + error.message, "error");
     showToast(editingPaiement ? "Paiement mis à jour ✓" : "Paiement enregistré ✓", "success");
     closeModalPaiement(); load();
@@ -542,7 +542,7 @@ function Charges({ showToast }) {
   );
 }
 
-function Travaux({ showToast }) {
+function Travaux({ showToast, userId }) {
   const [data, setData] = useState([]);
   const [residences, setResidences] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -569,7 +569,7 @@ function Travaux({ showToast }) {
     const payload = { ...form, montant: form.montant ? parseFloat(form.montant) : null };
     const { error } = editing
       ? await supabase.from("travaux").update(payload).eq("id", editing)
-      : await supabase.from("travaux").insert([payload]);
+      : await supabase.from("travaux").insert([{ ...payload, user_id: userId }]);
     if (error) return showToast("Erreur : " + error.message, "error");
     showToast(editing ? "Travaux mis à jour ✓" : "Travaux ajoutés ✓", "success");
     closeModal(); load();
@@ -637,7 +637,7 @@ function Travaux({ showToast }) {
   );
 }
 
-function Assemblees({ showToast }) {
+function Assemblees({ showToast, userId }) {
   const [data, setData] = useState([]);
   const [residences, setResidences] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -663,7 +663,7 @@ function Assemblees({ showToast }) {
     if (!form.titre || !form.date_ag) return showToast("Titre et date obligatoires", "error");
     const { error } = editing
       ? await supabase.from("assemblees").update(form).eq("id", editing)
-      : await supabase.from("assemblees").insert([form]);
+      : await supabase.from("assemblees").insert([{ ...form, user_id: userId }]);
     if (error) return showToast("Erreur : " + error.message, "error");
     showToast(editing ? "AG mise à jour ✓" : "AG planifiée ✓", "success");
     closeModal(); load();
@@ -985,7 +985,7 @@ function Finance() {
   );
 }
 
-function Incidents({ showToast }) {
+function Incidents({ showToast, userId }) {
   const [data, setData] = useState([]);
   const [residences, setResidences] = useState([]);
   const [historique, setHistorique] = useState([]);
@@ -1016,7 +1016,7 @@ function Incidents({ showToast }) {
 
   async function save() {
     if (!form.titre) return showToast("Le titre est obligatoire", "error");
-    const { error } = await supabase.from("incidents").insert([form]);
+    const { error } = await supabase.from("incidents").insert([{ ...form, user_id: userId }]);
     if (error) return showToast("Erreur : " + error.message, "error");
     showToast("Incident signalé ✓", "success");
     setModal(false); setForm(emptyForm); load();
@@ -1144,7 +1144,7 @@ function Incidents({ showToast }) {
   );
 }
 
-function CarnetEntretien({ showToast }) {
+function CarnetEntretien({ showToast, userId }) {
   const [data, setData] = useState([]);
   const [residences, setResidences] = useState([]);
   const [interventions, setInterventions] = useState([]);
@@ -1189,7 +1189,7 @@ function CarnetEntretien({ showToast }) {
   async function save() {
     if (!form.label) return showToast("Le label est obligatoire", "error");
     const payload = { ...form, periodicite_mois: parseInt(form.periodicite_mois), prochaine_echeance: calcProchaine(form.derniere_intervention, form.periodicite_mois) || null, residence_id: form.residence_id || null };
-    const { error } = await supabase.from("entretiens").insert([payload]);
+    const { error } = await supabase.from("entretiens").insert([{ ...payload, user_id: userId }]);
     if (error) return showToast("Erreur : " + error.message, "error");
     showToast("Équipement ajouté ✓", "success");
     setModal(false); setForm(emptyForm); load();
@@ -1397,16 +1397,17 @@ export default function App() {
   if (session === undefined) return null;
   if (!session) return <Login />;
 
+  const userId = session.user.id;
   const pages = {
     dashboard: <Dashboard />,
-    residences: <Residences showToast={showToast} />,
-    coproprietaires: <Coproprietaires showToast={showToast} />,
-    charges: <Charges showToast={showToast} />,
-    travaux: <Travaux showToast={showToast} />,
-    assemblees: <Assemblees showToast={showToast} />,
+    residences: <Residences showToast={showToast} userId={userId} />,
+    coproprietaires: <Coproprietaires showToast={showToast} userId={userId} />,
+    charges: <Charges showToast={showToast} userId={userId} />,
+    travaux: <Travaux showToast={showToast} userId={userId} />,
+    assemblees: <Assemblees showToast={showToast} userId={userId} />,
     finance: <Finance />,
-    incidents: <Incidents showToast={showToast} />,
-    carnet: <CarnetEntretien showToast={showToast} />,
+    incidents: <Incidents showToast={showToast} userId={userId} />,
+    carnet: <CarnetEntretien showToast={showToast} userId={userId} />,
   };
 
   const nav = [
