@@ -1342,7 +1342,7 @@ function Login() {
   return (
     <>
       <style>{styles}</style>
-      <div style={{ height: "100%", minHeight: "100vh", background: "var(--bleu-nuit)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ position: "fixed", inset: 0, background: "var(--bleu-nuit)", display: "flex", alignItems: "center", justifyContent: "center" }}>
         <div style={{ background: "var(--bleu-profond)", border: "1px solid var(--bleu-moyen)", borderRadius: 16, padding: "48px 40px", width: 380, boxShadow: "0 20px 60px rgba(0,0,0,0.4)" }}>
           <div style={{ textAlign: "center", marginBottom: 32 }}>
             <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 28, color: "var(--or)", marginBottom: 6 }}>SyndicPro</div>
