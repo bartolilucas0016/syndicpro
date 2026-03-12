@@ -56,7 +56,7 @@ const styles = `
   .stat-label { font-size: 11px; color: var(--gris); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px; }
   .stat-value { font-size: 26px; font-weight: 600; }
   .stat-sub { font-size: 11px; color: var(--gris); margin-top: 4px; }
-  .table-wrap { overflow-x: auto; }
+  .table-wrap { overflow-x: auto; background: var(--bleu-profond); }
   table { width: 100%; border-collapse: collapse; }
   thead th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--gris); padding: 8px 16px 10px 0; border-bottom: 1px solid var(--bleu-moyen); }
   thead th:last-child { padding-right: 0; }
