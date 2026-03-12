@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import * as XLSX from "xlsx";
+import { jsPDF } from "jspdf";
+import JSZip from "jszip";
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
@@ -497,6 +499,72 @@ function Charges({ showToast, userId }) {
     showToast("Supprimé", "success"); load();
   }
 
+  async function genererPDFs(charge) {
+    const { data: coprosRes } = await supabase
+      .from("coproprietaires")
+      .select("nom, prenom, lot, tantièmes")
+      .eq("residence_id", charge.residence_id);
+    const liste = coprosRes || [];
+    if (liste.length === 0) return showToast("Aucun copropriétaire dans cette résidence", "error");
+    const totalTantiemes = liste.reduce((s, c) => s + (c["tantièmes"] || 0), 0);
+    const zip = new JSZip();
+    liste.forEach(copro => {
+      const doc = new jsPDF();
+      const quotePart = totalTantiemes > 0 ? ((charge.montant_total * (copro["tantièmes"] || 0)) / totalTantiemes).toFixed(2) : "—";
+      // Header
+      doc.setFillColor(15, 27, 45);
+      doc.rect(0, 0, 210, 40, "F");
+      doc.setTextColor(201, 168, 76);
+      doc.setFontSize(22);
+      doc.text("SyndicPro", 14, 18);
+      doc.setFontSize(10);
+      doc.setTextColor(138, 154, 181);
+      doc.text("Appel de fonds — " + (charge.residences?.nom || ""), 14, 28);
+      doc.text("Réf. AF-" + charge.id.slice(0, 8).toUpperCase(), 14, 35);
+      // Destinataire
+      doc.setTextColor(240, 237, 230);
+      doc.setFontSize(13);
+      doc.text("Destinataire", 14, 55);
+      doc.setFontSize(11);
+      doc.setTextColor(138, 154, 181);
+      doc.text(`${copro.prenom} ${copro.nom}`, 14, 63);
+      doc.text(`Lot : ${copro.lot || "—"}  ·  Tantièmes : ${copro["tantièmes"] || 0}`, 14, 70);
+      // Séparateur
+      doc.setDrawColor(30, 58, 95);
+      doc.line(14, 78, 196, 78);
+      // Détail charge
+      doc.setTextColor(240, 237, 230);
+      doc.setFontSize(13);
+      doc.text("Détail de l'appel de fonds", 14, 90);
+      doc.setFontSize(11);
+      doc.setTextColor(138, 154, 181);
+      doc.text(`Objet : ${charge.titre}`, 14, 100);
+      doc.text(`Montant total : ${charge.montant_total} €`, 14, 108);
+      doc.text(`Échéance : ${charge.date_echeance || "—"}`, 14, 116);
+      doc.text(`Trimestre : ${charge.trimestre || "—"}`, 14, 124);
+      // Quote-part
+      doc.setFillColor(22, 34, 54);
+      doc.roundedRect(14, 135, 182, 30, 4, 4, "F");
+      doc.setTextColor(138, 154, 181);
+      doc.setFontSize(10);
+      doc.text("Votre quote-part", 20, 146);
+      doc.setTextColor(201, 168, 76);
+      doc.setFontSize(20);
+      doc.text(`${quotePart} €`, 20, 158);
+      // Pied de page
+      doc.setTextColor(138, 154, 181);
+      doc.setFontSize(9);
+      doc.text("Document généré automatiquement par SyndicPro", 14, 280);
+      zip.file(`${copro.lot || copro.nom}_${charge.titre}.pdf`, doc.output("arraybuffer"));
+    });
+    const blob = await zip.generateAsync({ type: "blob" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `appel_de_fonds_${charge.titre}.zip`; a.click();
+    URL.revokeObjectURL(url);
+    showToast(`${liste.length} PDF(s) générés ✓`, "success");
+  }
+
   if (loading) return <div className="loading">⏳ Chargement...</div>;
   return (
     <div>
@@ -517,6 +585,7 @@ function Charges({ showToast, userId }) {
                 <div className="list-content"><div className="list-title">{c.titre}</div><div className="list-sub">{c.residences?.nom} · {c.date_echeance}</div></div>
                 <div style={{ color: "var(--or-clair)", fontWeight: 600, marginRight: 8 }}>{c.montant_total} €</div>
                 <div className="list-actions">
+                  <button className="btn btn-secondary btn-sm" onClick={() => genererPDFs(c)} title="Générer les PDFs">📄</button>
                   <button className="btn btn-edit btn-sm" onClick={() => openEditCharge(c)}>✏️</button>
                   <button className="btn btn-danger btn-sm" onClick={() => supprimerCharge(c.id)}>🗑️</button>
                 </div>
