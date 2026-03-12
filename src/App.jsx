@@ -57,6 +57,9 @@ const styles = `
   .stat-value { font-size: 26px; font-weight: 600; }
   .stat-sub { font-size: 11px; color: var(--gris); margin-top: 4px; }
   .table-wrap { overflow-x: auto; background: var(--bleu-profond); }
+  .search-bar { display: flex; align-items: center; gap: 10px; background: var(--bleu-nuit); border: 1px solid var(--bleu-moyen); border-radius: 8px; padding: 8px 14px; margin-bottom: 16px; }
+  .search-bar input { background: none; border: none; outline: none; color: var(--blanc); font-size: 13px; width: 100%; }
+  .search-bar input::placeholder { color: var(--gris); }
   table { width: 100%; border-collapse: collapse; }
   thead th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--gris); padding: 8px 16px 10px 0; border-bottom: 1px solid var(--bleu-moyen); }
   thead th:last-child { padding-right: 0; }
@@ -191,6 +194,7 @@ function Residences({ showToast, userId }) {
   const [editing, setEditing] = useState(null);
   const emptyForm = { nom: "", adresse: "", ville: "", code_postal: "", nb_lots: "" };
   const [form, setForm] = useState(emptyForm);
+  const [recherche, setRecherche] = useState("");
 
   async function load() {
     const { data: r } = await supabase.from("residences").select("*").order("nom");
@@ -228,10 +232,11 @@ function Residences({ showToast, userId }) {
         <div><div className="page-title">🏢 Résidences</div><div className="page-sub">{data.length} résidence(s) gérée(s)</div></div>
         <button className="btn btn-primary" onClick={openCreate}>+ Ajouter</button>
       </div>
+      <div className="search-bar"><span style={{ color: "var(--gris)" }}>🔍</span><input placeholder="Rechercher par nom, ville, adresse…" value={recherche} onChange={e => setRecherche(e.target.value)} /></div>
       <div className="grid-3">
-        {data.length === 0 ? (
-          <div className="empty"><div className="empty-icon">🏢</div><div className="empty-text">Aucune résidence</div></div>
-        ) : data.map(r => (
+        {(() => { const filtres = data.filter(r => { const q = recherche.toLowerCase(); return !q || `${r.nom} ${r.ville} ${r.adresse}`.toLowerCase().includes(q); }); return filtres.length === 0 ? (
+          <div className="empty"><div className="empty-icon">🏢</div><div className="empty-text">{recherche ? "Aucun résultat" : "Aucune résidence"}</div></div>
+        ) : filtres.map(r => (
           <div className="card" key={r.id}>
             <div className="card-header">
               <span className="card-title">🏢 {r.nom}</span>
@@ -246,7 +251,7 @@ function Residences({ showToast, userId }) {
               <div>🔑 {r.nb_lots} lots</div>
             </div>
           </div>
-        ))}
+        )); })()}
       </div>
       {modal && (
         <Modal title={editing ? "✏️ Modifier la résidence" : "🏢 Nouvelle résidence"} onClose={closeModal}>
@@ -275,6 +280,7 @@ function Coproprietaires({ showToast, userId }) {
   const [editing, setEditing] = useState(null);
   const emptyForm = { nom: "", prenom: "", email: "", telephone: "", lot: "", "tantièmes": "", residence_id: "" };
   const [form, setForm] = useState(emptyForm);
+  const [recherche, setRecherche] = useState("");
   const fileRef = useRef(null);
 
   function telechargerTemplate() {
@@ -353,10 +359,11 @@ function Coproprietaires({ showToast, userId }) {
         <button className="btn btn-primary" onClick={openCreate}>+ Ajouter</button>
       </div>
       <div className="card">
-        {data.length === 0 ? <div className="empty"><div className="empty-icon">👤</div><div className="empty-text">Aucun copropriétaire</div></div> : (
+        <div className="search-bar"><span style={{ color: "var(--gris)" }}>🔍</span><input placeholder="Rechercher par nom, lot, email, résidence…" value={recherche} onChange={e => setRecherche(e.target.value)} /></div>
+        {(() => { const filtres = data.filter(c => { const q = recherche.toLowerCase(); return !q || `${c.prenom} ${c.nom} ${c.lot} ${c.email} ${c.residences?.nom || ""}`.toLowerCase().includes(q); }); return filtres.length === 0 ? <div className="empty"><div className="empty-icon">👤</div><div className="empty-text">{recherche ? "Aucun résultat" : "Aucun copropriétaire"}</div></div> : (
           <div className="table-wrap"><table>
             <thead><tr><th>Nom</th><th>Lot</th><th>Email</th><th>Résidence</th><th>Tantièmes</th><th></th></tr></thead>
-            <tbody>{data.map(c => (
+            <tbody>{filtres.map(c => (
               <tr key={c.id}>
                 <td><strong>{c.prenom} {c.nom}</strong></td>
                 <td style={{ color: "var(--or-clair)" }}>{c.lot}</td>
@@ -372,7 +379,7 @@ function Coproprietaires({ showToast, userId }) {
               </tr>
             ))}</tbody>
           </table></div>
-        )}
+        ); })()}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
           <button className="btn btn-secondary" onClick={telechargerTemplate}>⬇️ Template Excel</button>
           <button className="btn btn-secondary" onClick={() => fileRef.current.click()}>📂 Importer Excel</button>
@@ -602,6 +609,7 @@ function Travaux({ showToast, userId }) {
   const [editing, setEditing] = useState(null);
   const emptyForm = { titre: "", description: "", prestataire: "", montant: "", date_debut: "", date_fin_prevue: "", statut: "planifie", urgence: false, residence_id: "" };
   const [form, setForm] = useState(emptyForm);
+  const [recherche, setRecherche] = useState("");
 
   async function load() {
     const [t, r] = await Promise.all([supabase.from("travaux").select("*, residences(nom)").order("created_at", { ascending: false }), supabase.from("residences").select("id, nom")]);
@@ -637,12 +645,13 @@ function Travaux({ showToast, userId }) {
   return (
     <div>
       <div className="topbar"><div><div className="page-title">🔧 Travaux & Prestataires</div><div className="page-sub">{data.length} intervention(s)</div></div><button className="btn btn-primary" onClick={openCreate}>+ Nouveau chantier</button></div>
+      <div className="search-bar"><span style={{ color: "var(--gris)" }}>🔍</span><input placeholder="Rechercher par titre, prestataire, résidence…" value={recherche} onChange={e => setRecherche(e.target.value)} /></div>
       <div className="grid-3">
-        {["planifie", "en_cours", "termine"].map(statut => (
+        {["planifie", "en_cours", "termine"].map(statut => { const filtres = data.filter(t => { const q = recherche.toLowerCase(); return t.statut === statut && (!q || `${t.titre} ${t.prestataire || ""} ${t.residences?.nom || ""}`.toLowerCase().includes(q)); }); return (
           <div className="card" key={statut}>
-            <div className="card-header"><span className="card-title"><Badge statut={statut} /></span><span style={{ color: "var(--gris)", fontSize: 12 }}>{data.filter(t => t.statut === statut).length}</span></div>
-            {data.filter(t => t.statut === statut).length === 0 ? <div className="empty" style={{ padding: "20px 0" }}><div className="empty-text">Aucun</div></div> :
-              data.filter(t => t.statut === statut).map(t => (
+            <div className="card-header"><span className="card-title"><Badge statut={statut} /></span><span style={{ color: "var(--gris)", fontSize: 12 }}>{filtres.length}</span></div>
+            {filtres.length === 0 ? <div className="empty" style={{ padding: "20px 0" }}><div className="empty-text">Aucun</div></div> :
+              filtres.map(t => (
                 <div className="list-item" key={t.id} style={{ borderLeft: `3px solid ${t.urgence ? "var(--rouge)" : "transparent"}` }}>
                   <div className="list-content"><div className="list-title">{t.urgence ? "🚨 " : ""}{t.titre}</div><div className="list-sub">{t.prestataire || "—"}{t.montant ? ` · ${t.montant} €` : ""}</div></div>
                   <div className="list-actions">
@@ -653,7 +662,7 @@ function Travaux({ showToast, userId }) {
               ))
             }
           </div>
-        ))}
+        ); })}
       </div>
       {modal && <Modal title={editing ? "✏️ Modifier le chantier" : "🔧 Nouveau chantier"} onClose={closeModal}>
         <div className="form-group"><label className="form-label">Titre *</label><input className="form-input" value={form.titre} onChange={e => setForm({ ...form, titre: e.target.value })} /></div>
@@ -697,6 +706,7 @@ function Assemblees({ showToast, userId }) {
   const [editing, setEditing] = useState(null);
   const emptyForm = { titre: "", date_ag: "", lieu: "", type_ag: "ordinaire", statut: "planifiee", residence_id: "" };
   const [form, setForm] = useState(emptyForm);
+  const [recherche, setRecherche] = useState("");
 
   async function load() {
     const [a, r] = await Promise.all([supabase.from("assemblees").select("*, residences(nom)").order("date_ag", { ascending: false }), supabase.from("residences").select("id, nom")]);
@@ -731,9 +741,10 @@ function Assemblees({ showToast, userId }) {
   return (
     <div>
       <div className="topbar"><div><div className="page-title">📋 Assemblées Générales</div><div className="page-sub">{data.length} AG enregistrée(s)</div></div><button className="btn btn-primary" onClick={openCreate}>+ Planifier une AG</button></div>
+      <div className="search-bar"><span style={{ color: "var(--gris)" }}>🔍</span><input placeholder="Rechercher par titre, lieu, résidence…" value={recherche} onChange={e => setRecherche(e.target.value)} /></div>
       <div className="card">
-        {data.length === 0 ? <div className="empty"><div className="empty-icon">📋</div><div className="empty-text">Aucune AG planifiée</div></div> :
-          data.map(a => (
+        {(() => { const filtres = data.filter(a => { const q = recherche.toLowerCase(); return !q || `${a.titre} ${a.lieu || ""} ${a.residences?.nom || ""}`.toLowerCase().includes(q); }); return filtres.length === 0 ? <div className="empty"><div className="empty-icon">📋</div><div className="empty-text">{recherche ? "Aucun résultat" : "Aucune AG planifiée"}</div></div> :
+          filtres.map(a => (
             <div className="list-item" key={a.id}>
               <div className="list-icon">{a.statut === "tenue" ? "✅" : "📋"}</div>
               <div className="list-content">
@@ -747,7 +758,7 @@ function Assemblees({ showToast, userId }) {
               </div>
             </div>
           ))
-        }
+        ; })()}
       </div>
       {modal && <Modal title={editing ? "✏️ Modifier l'AG" : "📋 Planifier une AG"} onClose={closeModal}>
         <div className="form-group"><label className="form-label">Titre *</label><input className="form-input" value={form.titre} onChange={e => setForm({ ...form, titre: e.target.value })} /></div>
@@ -1047,6 +1058,7 @@ function Incidents({ showToast, userId }) {
   const emptyForm = { titre: "", description: "", residence_id: "" };
   const [form, setForm] = useState(emptyForm);
   const [detailForm, setDetailForm] = useState({ statut: "", commentaire: "" });
+  const [recherche, setRecherche] = useState("");
 
   async function load() {
     const [inc, res] = await Promise.all([
@@ -1097,11 +1109,12 @@ function Incidents({ showToast, userId }) {
 
   if (loading) return <div className="loading">⏳ Chargement...</div>;
 
-  const ouverts = data.filter(i => i.statut === "ouvert");
-  const enCours = data.filter(i => i.statut === "en_cours");
+  const filtres = data.filter(i => { const q = recherche.toLowerCase(); return !q || `${i.titre} ${i.description || ""} ${i.residences?.nom || ""}`.toLowerCase().includes(q); });
+  const ouverts = filtres.filter(i => i.statut === "ouvert");
+  const enCours = filtres.filter(i => i.statut === "en_cours");
   const debutMois = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
-  const resolus = data.filter(i => i.statut === "resolu" && i.resolu_at && new Date(i.resolu_at) >= debutMois);
-  const resolusAll = data.filter(i => i.statut === "resolu");
+  const resolus = filtres.filter(i => i.statut === "resolu" && i.resolu_at && new Date(i.resolu_at) >= debutMois);
+  const resolusAll = filtres.filter(i => i.statut === "resolu");
 
   const statutBadge = { ouvert: "badge-red", en_cours: "badge-orange", resolu: "badge-green" };
   const statutLabel = { ouvert: "Ouvert", en_cours: "En cours", resolu: "Résolu" };
@@ -1117,6 +1130,7 @@ function Incidents({ showToast, userId }) {
         <div><div className="page-title">🔧 Incidents</div><div className="page-sub">{data.length} incident(s) enregistré(s)</div></div>
         <button className="btn btn-primary" onClick={() => setModal(true)}>+ Signaler un incident</button>
       </div>
+      <div className="search-bar"><span style={{ color: "var(--gris)" }}>🔍</span><input placeholder="Rechercher par titre, description, résidence…" value={recherche} onChange={e => setRecherche(e.target.value)} /></div>
       <div className="grid-3" style={{ marginBottom: 20 }}>
         <div className="stat-card"><div className="stat-label">🔴 Ouverts</div><div className="stat-value" style={{ color: "var(--rouge)" }}>{ouverts.length}</div><div className="stat-sub">à traiter</div></div>
         <div className="stat-card"><div className="stat-label">🟠 En cours</div><div className="stat-value" style={{ color: "var(--orange)" }}>{enCours.length}</div><div className="stat-sub">en traitement</div></div>
@@ -1209,6 +1223,7 @@ function CarnetEntretien({ showToast, userId }) {
   const TYPE_LABEL = { ascenseur: "Ascenseur", extincteurs: "Extincteurs", chaudiere: "Chaudière", electricite: "Électricité", colonnes_eau: "Colonnes d'eau" };
   const PERIODICITE_DEFAUT = { ascenseur: 12, extincteurs: 12, chaudiere: 12, electricite: 60, colonnes_eau: 12 };
 
+  const [recherche, setRecherche] = useState("");
   const emptyForm = { type: "ascenseur", label: "", residence_id: "", periodicite_mois: 12, derniere_intervention: "", prestataire: "", notes: "" };
   const emptyFormInt = { date_intervention: new Date().toISOString().split("T")[0], prestataire: "", rapport: "" };
   const [form, setForm] = useState(emptyForm);
@@ -1269,7 +1284,8 @@ function CarnetEntretien({ showToast, userId }) {
   }
 
   const urgOrdre = { retard: 0, urgent: 1, ok: 2, inconnu: 3 };
-  const sortedData = [...data].sort((a, b) => urgOrdre[urgence(a)] - urgOrdre[urgence(b)]);
+  const dataFiltree = data.filter(e => { const q = recherche.toLowerCase(); return !q || `${e.label} ${e.prestataire || ""} ${e.residences?.nom || ""}`.toLowerCase().includes(q); });
+  const sortedData = [...dataFiltree].sort((a, b) => urgOrdre[urgence(a)] - urgOrdre[urgence(b)]);
   const enRetard = data.filter(e => urgence(e) === "retard").length;
   const urgentCount = data.filter(e => urgence(e) === "urgent").length;
   const aJour = data.filter(e => urgence(e) === "ok").length;
@@ -1287,6 +1303,7 @@ function CarnetEntretien({ showToast, userId }) {
         <div><div className="page-title">📋 Carnet d'entretien</div><div className="page-sub">{data.length} équipement(s) suivi(s)</div></div>
         <button className="btn btn-primary" onClick={() => setModal(true)}>+ Ajouter un équipement</button>
       </div>
+      <div className="search-bar"><span style={{ color: "var(--gris)" }}>🔍</span><input placeholder="Rechercher par équipement, prestataire, résidence…" value={recherche} onChange={e => setRecherche(e.target.value)} /></div>
       <div className="grid-3" style={{ marginBottom: 20 }}>
         <div className="stat-card"><div className="stat-label">🔴 En retard</div><div className="stat-value" style={{ color: "var(--rouge)" }}>{enRetard}</div><div className="stat-sub">intervention requise</div></div>
         <div className="stat-card"><div className="stat-label">🟠 Échéance &lt; 30j</div><div className="stat-value" style={{ color: "var(--orange)" }}>{urgentCount}</div><div className="stat-sub">à planifier</div></div>
