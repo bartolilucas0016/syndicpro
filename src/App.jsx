@@ -15,7 +15,7 @@ const styles = `
     --or: #c9a84c; --or-clair: #e8c97a; --blanc: #f0ede6; --gris: #8a9ab5;
     --vert: #2ecc71; --rouge: #e74c3c; --orange: #f39c12; --bleu: #3498db;
   }
-  html, body, #root { height: 100%; }
+  html, body, #root { min-height: 100%; }
   body { font-family: 'DM Sans', sans-serif; background: var(--bleu-nuit); color: var(--blanc); }
   ::-webkit-scrollbar { width: 8px; height: 8px; }
   ::-webkit-scrollbar-track { background: var(--bleu-nuit); }
