@@ -17,6 +17,10 @@ const styles = `
   }
   html, body, #root { height: 100%; }
   body { font-family: 'DM Sans', sans-serif; background: var(--bleu-nuit); color: var(--blanc); }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: var(--bleu-nuit); }
+  ::-webkit-scrollbar-thumb { background: var(--bleu-moyen); border-radius: 4px; }
+  ::-webkit-scrollbar-corner { background: var(--bleu-nuit); }
   .app { display: flex; min-height: 100vh; }
   .sidebar { width: 240px; min-height: 100vh; background: var(--bleu-profond); border-right: 1px solid var(--bleu-moyen); display: flex; flex-direction: column; position: fixed; top: 0; left: 0; z-index: 100; }
   .sidebar-logo { padding: 24px 20px; border-bottom: 1px solid var(--bleu-moyen); }
