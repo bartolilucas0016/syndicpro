@@ -1592,6 +1592,213 @@ function CarnetEntretien({ showToast, userId }) {
   );
 }
 
+function Documents({ showToast, userId }) {
+  const [residences, setResidences] = useState([]);
+  const [documents, setDocuments] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedResidence, setSelectedResidence] = useState(null);
+  const [selectedCategorie, setSelectedCategorie] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const fileInputRef = useRef(null);
+
+  const categories = [
+    { id: "ag_pv", label: "AG & PV", icon: "📋" },
+    { id: "travaux_devis", label: "Travaux & Devis", icon: "🔧" },
+    { id: "contrats", label: "Contrats", icon: "📝" },
+    { id: "diagnostics", label: "Diagnostics", icon: "🔍" },
+    { id: "reglements", label: "Règlements", icon: "⚖️" },
+    { id: "autres", label: "Autres", icon: "📁" },
+  ];
+
+  async function load() {
+    const [r, d] = await Promise.all([
+      supabase.from("residences").select("id, nom"),
+      supabase.from("documents").select("*, residences(nom)").order("created_at", { ascending: false }),
+    ]);
+    setResidences(r.data || []);
+    setDocuments(d.data || []);
+    setLoading(false);
+  }
+  useEffect(() => { load(); }, []);
+
+  const docsFiltres = documents.filter(d => {
+    if (selectedResidence && d.residence_id !== selectedResidence) return false;
+    if (selectedCategorie && d.categorie !== selectedCategorie) return false;
+    return true;
+  });
+
+  function countByCategorie(catId) {
+    return documents.filter(d => (!selectedResidence || d.residence_id === selectedResidence) && d.categorie === catId).length;
+  }
+
+  function formatTaille(bytes) {
+    if (!bytes) return "—";
+    if (bytes < 1024) return `${bytes} o`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} Ko`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} Mo`;
+  }
+
+  function iconeExtension(nom) {
+    const ext = (nom || "").split(".").pop().toLowerCase();
+    if (ext === "pdf") return { icon: "📄", color: "var(--rouge)" };
+    if (["xls", "xlsx", "csv"].includes(ext)) return { icon: "📊", color: "var(--vert)" };
+    if (["doc", "docx"].includes(ext)) return { icon: "📝", color: "var(--bleu)" };
+    if (["jpg", "jpeg", "png", "gif", "webp"].includes(ext)) return { icon: "🖼️", color: "var(--orange)" };
+    return { icon: "📁", color: "var(--gris)" };
+  }
+
+  async function uploadFichier(file) {
+    if (!selectedResidence || !selectedCategorie) return showToast("Sélectionnez une résidence et une catégorie d'abord", "error");
+    setUploading(true);
+    const path = `${selectedResidence}/${selectedCategorie}/${Date.now()}_${file.name}`;
+    const { error: storageErr } = await supabase.storage.from("documents").upload(path, file);
+    if (storageErr) { setUploading(false); return showToast("Erreur upload : " + storageErr.message, "error"); }
+    const { error: dbErr } = await supabase.from("documents").insert([{ nom: file.name, residence_id: selectedResidence, categorie: selectedCategorie, path, taille: file.size }]);
+    if (dbErr) { setUploading(false); return showToast("Erreur BDD : " + dbErr.message, "error"); }
+    showToast(`${file.name} uploadé ✓`, "success");
+    setUploading(false);
+    load();
+  }
+
+  async function handleDrop(e) {
+    e.preventDefault(); setDragOver(false);
+    for (const file of Array.from(e.dataTransfer.files)) await uploadFichier(file);
+  }
+
+  async function handleFileInput(e) {
+    for (const file of Array.from(e.target.files)) await uploadFichier(file);
+    e.target.value = "";
+  }
+
+  async function telecharger(doc) {
+    const { data, error } = await supabase.storage.from("documents").download(doc.path);
+    if (error) return showToast("Erreur téléchargement", "error");
+    const url = URL.createObjectURL(data);
+    const a = document.createElement("a"); a.href = url; a.download = doc.nom; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function supprimer(doc) {
+    if (!confirm(`Supprimer "${doc.nom}" ?`)) return;
+    await supabase.storage.from("documents").remove([doc.path]);
+    await supabase.from("documents").delete().eq("id", doc.id);
+    showToast("Supprimé ✓", "success"); load();
+  }
+
+  if (loading) return <div className="loading">⏳ Chargement...</div>;
+
+  return (
+    <div>
+      <div className="topbar">
+        <div><div className="page-title">📁 Documents</div><div className="page-sub">{documents.length} document(s)</div></div>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "220px 1fr", gap: 16 }}>
+
+        {/* Sidebar gauche */}
+        <div className="card" style={{ padding: 0, overflow: "hidden", alignSelf: "start" }}>
+          <div
+            className={`nav-item ${!selectedResidence ? "active" : ""}`}
+            style={{ borderRadius: 0, borderLeft: "3px solid transparent", margin: 0, padding: "12px 16px", borderBottom: "1px solid var(--bleu-moyen)" }}
+            onClick={() => { setSelectedResidence(null); setSelectedCategorie(null); }}
+          >
+            <span>🏘️</span> Toutes les résidences
+          </div>
+          {residences.map(r => (
+            <div key={r.id}>
+              <div
+                className={`nav-item ${selectedResidence === r.id && !selectedCategorie ? "active" : ""}`}
+                style={{ borderRadius: 0, borderLeft: "3px solid transparent", margin: 0, padding: "10px 16px" }}
+                onClick={() => { setSelectedResidence(r.id); setSelectedCategorie(null); }}
+              >
+                <span>🏢</span> {r.nom}
+              </div>
+              {selectedResidence === r.id && categories.map(cat => (
+                <div
+                  key={cat.id}
+                  className={`nav-item ${selectedCategorie === cat.id ? "active" : ""}`}
+                  style={{ borderRadius: 0, borderLeft: "3px solid transparent", margin: 0, padding: "7px 16px 7px 30px", fontSize: 12 }}
+                  onClick={() => setSelectedCategorie(cat.id)}
+                >
+                  <span>{cat.icon}</span>
+                  <span style={{ flex: 1 }}>{cat.label}</span>
+                  <span style={{ background: "var(--bleu-moyen)", borderRadius: 10, padding: "1px 7px", fontSize: 11 }}>{countByCategorie(cat.id)}</span>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+
+        {/* Zone principale */}
+        <div>
+          {/* Drop zone */}
+          <div
+            onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={handleDrop}
+            onClick={() => (selectedResidence && selectedCategorie) && fileInputRef.current.click()}
+            style={{
+              border: `2px dashed ${dragOver ? "var(--or)" : "var(--bleu-moyen)"}`,
+              borderRadius: 12, padding: "24px 20px", textAlign: "center", marginBottom: 16,
+              cursor: (selectedResidence && selectedCategorie) ? "pointer" : "default",
+              background: dragOver ? "rgba(201,168,76,0.07)" : "var(--bleu-profond)", transition: "all 0.2s",
+            }}
+          >
+            {uploading ? (
+              <div style={{ color: "var(--gris)" }}>⏳ Upload en cours…</div>
+            ) : (!selectedResidence || !selectedCategorie) ? (
+              <div style={{ color: "var(--orange)", fontSize: 13 }}>⚠️ Sélectionnez une résidence et une catégorie à gauche avant d'uploader</div>
+            ) : (
+              <div>
+                <div style={{ fontSize: 26, marginBottom: 6 }}>📂</div>
+                <div style={{ color: "var(--gris)", fontSize: 13 }}>Glissez vos fichiers ici ou <span style={{ color: "var(--or)" }}>cliquez pour parcourir</span></div>
+              </div>
+            )}
+            <input ref={fileInputRef} type="file" multiple style={{ display: "none" }} onChange={handleFileInput} />
+          </div>
+
+          {/* Liste fichiers */}
+          <div className="card">
+            <div className="card-header">
+              <span className="card-title">
+                {selectedCategorie
+                  ? `${categories.find(c => c.id === selectedCategorie)?.icon} ${categories.find(c => c.id === selectedCategorie)?.label}`
+                  : selectedResidence
+                  ? `🏢 ${residences.find(r => r.id === selectedResidence)?.nom}`
+                  : "📁 Tous les documents"}
+              </span>
+              <span style={{ color: "var(--gris)", fontSize: 12 }}>{docsFiltres.length} fichier(s)</span>
+            </div>
+            {docsFiltres.length === 0
+              ? <div className="empty"><div className="empty-icon">📁</div><div className="empty-text">Aucun document</div></div>
+              : <div className="table-wrap"><table>
+                  <thead><tr><th>Fichier</th><th>Résidence</th><th>Catégorie</th><th>Taille</th><th>Date</th><th></th></tr></thead>
+                  <tbody>{docsFiltres.map(doc => {
+                    const { icon, color } = iconeExtension(doc.nom);
+                    const cat = categories.find(c => c.id === doc.categorie);
+                    return (
+                      <tr key={doc.id}>
+                        <td><span style={{ color, marginRight: 6 }}>{icon}</span>{doc.nom}</td>
+                        <td style={{ color: "var(--gris)" }}>{doc.residences?.nom || "—"}</td>
+                        <td style={{ color: "var(--gris)" }}>{cat ? `${cat.icon} ${cat.label}` : doc.categorie}</td>
+                        <td style={{ color: "var(--gris)" }}>{formatTaille(doc.taille)}</td>
+                        <td style={{ color: "var(--gris)" }}>{new Date(doc.created_at).toLocaleDateString("fr-FR")}</td>
+                        <td><div style={{ display: "flex", gap: 6 }}>
+                          <button className="btn btn-secondary btn-sm" onClick={() => telecharger(doc)}>⬇️</button>
+                          <button className="btn btn-danger btn-sm" onClick={() => supprimer(doc)}>🗑️</button>
+                        </div></td>
+                      </tr>
+                    );
+                  })}</tbody>
+                </table></div>
+            }
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Login() {
   const [mode, setMode] = useState("login");
   const [email, setEmail] = useState("");
@@ -1705,6 +1912,7 @@ export default function App() {
     finance: <Finance />,
     incidents: <Incidents showToast={showToast} userId={userId} />,
     carnet: <CarnetEntretien showToast={showToast} userId={userId} />,
+    documents: <Documents showToast={showToast} userId={userId} />,
   };
 
   const nav = [
@@ -1717,6 +1925,7 @@ export default function App() {
     { id: "finance", icon: "📊", label: "Finance" },
     { id: "incidents", icon: "⚠️", label: "Incidents" },
     { id: "carnet", icon: "🗒️", label: "Carnet d'entretien" },
+    { id: "documents", icon: "📁", label: "Documents" },
   ];
 
   const initiales = session.user.email.slice(0, 2).toUpperCase();
