@@ -31,7 +31,7 @@ const styles = `
   .avatar { width: 32px; height: 32px; border-radius: 50%; background: linear-gradient(135deg, var(--or), var(--bleu-moyen)); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: var(--bleu-nuit); }
   .user-name { font-size: 12px; font-weight: 600; }
   .user-role { font-size: 10px; color: var(--gris); }
-  .main { margin-left: 240px; flex: 1; padding: 28px; }
+  .main { margin-left: 240px; flex: 1; padding: 28px; background: var(--bleu-nuit); min-height: 100vh; }
   .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
   .page-title { font-family: 'Playfair Display', serif; font-size: 24px; }
   .page-sub { font-size: 13px; color: var(--gris); margin-top: 2px; }
