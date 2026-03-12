@@ -369,11 +369,11 @@ function Coproprietaires({ showToast, userId }) {
             ))}</tbody>
           </table></div>
         )}
-      </div>
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
-        <button className="btn btn-secondary" onClick={telechargerTemplate}>⬇️ Template Excel</button>
-        <button className="btn btn-secondary" onClick={() => fileRef.current.click()}>📂 Importer Excel</button>
-        <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: "none" }} onChange={importerExcel} />
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+          <button className="btn btn-secondary" onClick={telechargerTemplate}>⬇️ Template Excel</button>
+          <button className="btn btn-secondary" onClick={() => fileRef.current.click()}>📂 Importer Excel</button>
+          <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: "none" }} onChange={importerExcel} />
+        </div>
       </div>
       {modal && <Modal title={editing ? "✏️ Modifier le copropriétaire" : "➕ Nouveau copropriétaire"} onClose={closeModal}>
         <div className="form-row">
