@@ -346,12 +346,7 @@ function Coproprietaires({ showToast, userId }) {
     <div>
       <div className="topbar">
         <div><div className="page-title">👥 Copropriétaires</div><div className="page-sub">{data.length} propriétaire(s)</div></div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button className="btn btn-secondary" onClick={telechargerTemplate}>⬇️ Template Excel</button>
-          <button className="btn btn-secondary" onClick={() => fileRef.current.click()}>📂 Importer Excel</button>
-          <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: "none" }} onChange={importerExcel} />
-          <button className="btn btn-primary" onClick={openCreate}>+ Ajouter</button>
-        </div>
+        <button className="btn btn-primary" onClick={openCreate}>+ Ajouter</button>
       </div>
       <div className="card">
         {data.length === 0 ? <div className="empty"><div className="empty-icon">👤</div><div className="empty-text">Aucun copropriétaire</div></div> : (
@@ -374,6 +369,11 @@ function Coproprietaires({ showToast, userId }) {
             ))}</tbody>
           </table></div>
         )}
+      </div>
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+        <button className="btn btn-secondary" onClick={telechargerTemplate}>⬇️ Template Excel</button>
+        <button className="btn btn-secondary" onClick={() => fileRef.current.click()}>📂 Importer Excel</button>
+        <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: "none" }} onChange={importerExcel} />
       </div>
       {modal && <Modal title={editing ? "✏️ Modifier le copropriétaire" : "➕ Nouveau copropriétaire"} onClose={closeModal}>
         <div className="form-row">
