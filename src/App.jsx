@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import * as XLSX from "xlsx";
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
@@ -270,6 +271,45 @@ function Coproprietaires({ showToast, userId }) {
   const [editing, setEditing] = useState(null);
   const emptyForm = { nom: "", prenom: "", email: "", telephone: "", lot: "", "tantièmes": "", residence_id: "" };
   const [form, setForm] = useState(emptyForm);
+  const fileRef = useRef(null);
+
+  function telechargerTemplate() {
+    const ws = XLSX.utils.aoa_to_sheet([
+      ["prenom", "nom", "email", "telephone", "lot", "tantiemes"],
+      ["Jean", "Dupont", "jean.dupont@email.com", "0601020304", "A01", "150"],
+      ["Marie", "Martin", "marie.martin@email.com", "0605060708", "B02", "200"],
+    ]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Copropriétaires");
+    XLSX.writeFile(wb, "template_coproprietaires.xlsx");
+  }
+
+  async function importerExcel(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    e.target.value = "";
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      const wb = XLSX.read(ev.target.result, { type: "array" });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { defval: "" });
+      const lignes = rows.filter(r => r.nom && r.email).map(r => ({
+        prenom: String(r.prenom || ""),
+        nom: String(r.nom),
+        email: String(r.email),
+        telephone: String(r.telephone || ""),
+        lot: String(r.lot || ""),
+        "tantièmes": parseInt(r.tantiemes) || 0,
+        user_id: userId,
+      }));
+      if (lignes.length === 0) return showToast("Aucune ligne valide trouvée (nom + email requis)", "error");
+      const { error } = await supabase.from("coproprietaires").insert(lignes);
+      if (error) return showToast("Erreur import : " + error.message, "error");
+      showToast(`${lignes.length} copropriétaire(s) importé(s) ✓`, "success");
+      load();
+    };
+    reader.readAsArrayBuffer(file);
+  }
 
   async function load() {
     const [c, r] = await Promise.all([supabase.from("coproprietaires").select("*, residences(nom)").order("nom"), supabase.from("residences").select("id, nom")]);
@@ -304,7 +344,15 @@ function Coproprietaires({ showToast, userId }) {
   if (loading) return <div className="loading">⏳ Chargement...</div>;
   return (
     <div>
-      <div className="topbar"><div><div className="page-title">👥 Copropriétaires</div><div className="page-sub">{data.length} propriétaire(s)</div></div><button className="btn btn-primary" onClick={openCreate}>+ Ajouter</button></div>
+      <div className="topbar">
+        <div><div className="page-title">👥 Copropriétaires</div><div className="page-sub">{data.length} propriétaire(s)</div></div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="btn btn-secondary" onClick={telechargerTemplate}>⬇️ Template Excel</button>
+          <button className="btn btn-secondary" onClick={() => fileRef.current.click()}>📂 Importer Excel</button>
+          <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: "none" }} onChange={importerExcel} />
+          <button className="btn btn-primary" onClick={openCreate}>+ Ajouter</button>
+        </div>
+      </div>
       <div className="card">
         {data.length === 0 ? <div className="empty"><div className="empty-icon">👤</div><div className="empty-text">Aucun copropriétaire</div></div> : (
           <div className="table-wrap"><table>
