@@ -864,6 +864,76 @@ function Assemblees({ showToast, userId }) {
     showToast("Supprimée", "success"); load();
   }
 
+  function genererPV(ag) {
+    const doc = new jsPDF();
+    const dateAG = ag.date_ag ? new Date(ag.date_ag).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—";
+    const dateGen = new Date().toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
+    // Header
+    doc.setFillColor(15, 27, 45); doc.rect(0, 0, 210, 45, "F");
+    doc.setTextColor(201, 168, 76); doc.setFontSize(22); doc.text("SyndicPro", 14, 18);
+    doc.setFontSize(10); doc.setTextColor(138, 154, 181);
+    doc.text("Procès-verbal d'Assemblée Générale", 14, 28);
+    doc.text("Réf. AG-" + ag.id.slice(0, 8).toUpperCase(), 14, 36);
+    // Titre
+    doc.setTextColor(240, 237, 230); doc.setFontSize(15); doc.text(ag.titre, 14, 58);
+    doc.setDrawColor(30, 58, 95); doc.line(14, 63, 196, 63);
+    // Infos AG
+    doc.setFontSize(11); doc.setTextColor(138, 154, 181);
+    doc.text(`Résidence : ${ag.residences?.nom || "—"}`, 14, 74);
+    doc.text(`Date : ${dateAG}`, 14, 82);
+    doc.text(`Lieu : ${ag.lieu || "—"}`, 14, 90);
+    doc.text(`Type : AG ${ag.type_ag === "extraordinaire" ? "Extraordinaire" : "Ordinaire"}`, 14, 98);
+    doc.text(`Statut : ${ag.statut === "tenue" ? "Tenue" : "Planifiée"}`, 14, 106);
+    doc.line(14, 114, 196, 114);
+    // Section PV
+    doc.setTextColor(240, 237, 230); doc.setFontSize(13); doc.text("Procès-verbal", 14, 126);
+    doc.setFontSize(10); doc.setTextColor(138, 154, 181);
+    doc.text("L'assemblée générale s'est réunie conformément aux dispositions légales en vigueur.", 14, 136);
+    doc.text("Les copropriétaires ont été convoqués dans les délais réglementaires.", 14, 144);
+    // Zones à remplir
+    const zones = ["Ordre du jour", "Décisions prises", "Résultats des votes", "Questions diverses"];
+    let y = 158;
+    zones.forEach(zone => {
+      doc.setFillColor(22, 34, 54); doc.roundedRect(14, y, 182, 24, 3, 3, "F");
+      doc.setTextColor(201, 168, 76); doc.setFontSize(10); doc.text(zone, 20, y + 9);
+      doc.setTextColor(138, 154, 181); doc.setFontSize(9); doc.text("________________________________________________________", 20, y + 18);
+      y += 32;
+    });
+    // Signatures
+    doc.setDrawColor(30, 58, 95); doc.line(14, 263, 196, 263);
+    doc.setTextColor(138, 154, 181); doc.setFontSize(9);
+    doc.text("Signature du Président de séance", 14, 272);
+    doc.text("Signature du Secrétaire", 120, 272);
+    doc.text(`Document généré le ${dateGen} par SyndicPro`, 14, 285);
+    doc.save(`PV_AG_${ag.titre.replace(/\s+/g, "_")}.pdf`);
+    showToast("PV généré ✓", "success");
+  }
+
+  async function envoyerPVParEmail(ag) {
+    if (!ag.residence_id) return showToast("Aucune résidence liée à cette AG", "error");
+    const { data: coprosRes } = await supabase.from("coproprietaires").select("nom, prenom, email, lot").eq("residence_id", ag.residence_id);
+    const liste = (coprosRes || []).filter(c => c.email);
+    if (liste.length === 0) return showToast("Aucun copropriétaire avec email dans cette résidence", "error");
+    const dateAG = ag.date_ag ? new Date(ag.date_ag).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—";
+    showToast(`Envoi en cours… 0 / ${liste.length}`, "success");
+    let envoyes = 0;
+    for (const copro of liste) {
+      try {
+        await fetch("/api/envoyer-email", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type: "convocation",
+            destinataire: copro.email,
+            donnees: { nom: copro.nom, prenom: copro.prenom, titreAG: ag.titre, dateAG, lieu: ag.lieu || "—" },
+          }),
+        });
+        envoyes++;
+      } catch (e) { console.error("Échec envoi", copro.email, e); }
+    }
+    showToast(`${envoyes} convocation(s) envoyée(s) ✓`, "success");
+  }
+
   if (loading) return <div className="loading">⏳ Chargement...</div>;
   return (
     <div>
@@ -880,6 +950,8 @@ function Assemblees({ showToast, userId }) {
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end", marginRight: 8 }}><Badge statut={a.statut} /><Badge statut={a.type_ag} /></div>
               <div className="list-actions">
+                <button className="btn btn-secondary btn-sm" onClick={() => genererPV(a)} title="Télécharger le PV">📄</button>
+                <button className="btn btn-secondary btn-sm" onClick={() => envoyerPVParEmail(a)} title="Envoyer la convocation par email">📧</button>
                 <button className="btn btn-edit btn-sm" onClick={() => openEdit(a)}>✏️</button>
                 <button className="btn btn-danger btn-sm" onClick={() => supprimer(a.id)}>🗑️</button>
               </div>
