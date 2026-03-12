@@ -24,11 +24,11 @@ const styles = `
   ::-webkit-scrollbar-thumb { background: var(--bleu-moyen); border-radius: 4px; }
   ::-webkit-scrollbar-corner { background: var(--bleu-nuit); }
   .app { display: flex; min-height: 100vh; }
-  .sidebar { width: 240px; min-height: 100vh; background: var(--bleu-profond); border-right: 1px solid var(--bleu-moyen); display: flex; flex-direction: column; position: fixed; top: 0; left: 0; z-index: 100; }
+  .sidebar { width: 240px; height: 100vh; background: var(--bleu-profond); border-right: 1px solid var(--bleu-moyen); display: flex; flex-direction: column; position: fixed; top: 0; left: 0; z-index: 100; overflow: hidden; }
   .sidebar-logo { padding: 24px 20px; border-bottom: 1px solid var(--bleu-moyen); }
   .logo-title { font-family: 'Playfair Display', serif; font-size: 20px; color: var(--or); }
   .logo-sub { font-size: 10px; color: var(--gris); letter-spacing: 2px; text-transform: uppercase; margin-top: 2px; }
-  .nav { padding: 16px 10px; flex: 1; }
+  .nav { padding: 16px 10px; flex: 1; overflow-y: auto; }
   .nav-label { font-size: 10px; color: var(--gris); text-transform: uppercase; letter-spacing: 2px; padding: 0 10px; margin: 12px 0 6px; }
   .nav-item { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 8px; cursor: pointer; color: var(--gris); font-size: 13px; font-weight: 500; transition: all 0.2s; margin-bottom: 2px; border-left: 3px solid transparent; }
   .nav-item:hover { background: var(--bleu-moyen); color: var(--blanc); }
