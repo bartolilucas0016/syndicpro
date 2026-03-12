@@ -65,6 +65,29 @@ export default async function handler(req, res) {
         </div>
       `,
     };
+  } else if (type === "appel_de_fonds") {
+    emailData = {
+      from: "SyndicPro <onboarding@resend.dev>",
+      to: destinataire,
+      subject: `Appel de fonds — ${donnees.titreCharge}`,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px;">
+          <h2 style="color: #c9a84c;">SyndicPro — Appel de fonds</h2>
+          <p>Bonjour <strong>${donnees.prenom} ${donnees.nom}</strong>,</p>
+          <p>Veuillez trouver ci-joint votre appel de fonds pour le lot <strong>${donnees.lot}</strong>.</p>
+          <table style="width:100%;border-collapse:collapse;margin:16px 0;">
+            <tr><td style="padding:6px 0;color:#888;">Objet</td><td style="padding:6px 0;font-weight:600;">${donnees.titreCharge}</td></tr>
+            <tr><td style="padding:6px 0;color:#888;">Résidence</td><td style="padding:6px 0;">${donnees.residence}</td></tr>
+            <tr><td style="padding:6px 0;color:#888;">Échéance</td><td style="padding:6px 0;">${donnees.echeance || "—"}</td></tr>
+            <tr><td style="padding:6px 0;color:#888;">Votre quote-part</td><td style="padding:6px 0;font-weight:700;font-size:18px;color:#c9a84c;">${donnees.quotePart} €</td></tr>
+          </table>
+          <p>Merci de régler cette somme avant la date d'échéance indiquée.</p>
+          <br/>
+          <p>Cordialement,<br/>Le Syndic</p>
+        </div>
+      `,
+      attachments: donnees.pdfBase64 ? [{ filename: donnees.pdfNom || "appel_de_fonds.pdf", content: donnees.pdfBase64 }] : [],
+    };
   } else {
     return res.status(400).json({ error: "Type d'email inconnu" });
   }

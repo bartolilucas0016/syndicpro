@@ -565,6 +565,63 @@ function Charges({ showToast, userId }) {
     showToast(`${liste.length} PDF(s) générés ✓`, "success");
   }
 
+  async function envoyerPDFsParEmail(charge) {
+    const { data: coprosRes } = await supabase
+      .from("coproprietaires")
+      .select("nom, prenom, email, lot, tantièmes")
+      .eq("residence_id", charge.residence_id);
+    const liste = (coprosRes || []).filter(c => c.email);
+    if (liste.length === 0) return showToast("Aucun copropriétaire avec email dans cette résidence", "error");
+    const totalTantiemes = liste.reduce((s, c) => s + (c["tantièmes"] || 0), 0);
+
+    showToast(`Envoi en cours… 0 / ${liste.length}`, "success");
+    let envoyes = 0;
+    for (const copro of liste) {
+      const quotePart = totalTantiemes > 0 ? ((charge.montant_total * (copro["tantièmes"] || 0)) / totalTantiemes).toFixed(2) : "0.00";
+      // Générer le PDF
+      const doc = new jsPDF();
+      doc.setFillColor(15, 27, 45); doc.rect(0, 0, 210, 40, "F");
+      doc.setTextColor(201, 168, 76); doc.setFontSize(22); doc.text("SyndicPro", 14, 18);
+      doc.setFontSize(10); doc.setTextColor(138, 154, 181);
+      doc.text("Appel de fonds — " + (charge.residences?.nom || ""), 14, 28);
+      doc.text("Réf. AF-" + charge.id.slice(0, 8).toUpperCase(), 14, 35);
+      doc.setTextColor(240, 237, 230); doc.setFontSize(13); doc.text("Destinataire", 14, 55);
+      doc.setFontSize(11); doc.setTextColor(138, 154, 181);
+      doc.text(`${copro.prenom} ${copro.nom}`, 14, 63);
+      doc.text(`Lot : ${copro.lot || "—"}  ·  Tantièmes : ${copro["tantièmes"] || 0}`, 14, 70);
+      doc.setDrawColor(30, 58, 95); doc.line(14, 78, 196, 78);
+      doc.setTextColor(240, 237, 230); doc.setFontSize(13); doc.text("Détail de l'appel de fonds", 14, 90);
+      doc.setFontSize(11); doc.setTextColor(138, 154, 181);
+      doc.text(`Objet : ${charge.titre}`, 14, 100);
+      doc.text(`Montant total : ${charge.montant_total} €`, 14, 108);
+      doc.text(`Échéance : ${charge.date_echeance || "—"}`, 14, 116);
+      doc.setFillColor(22, 34, 54); doc.roundedRect(14, 130, 182, 30, 4, 4, "F");
+      doc.setTextColor(138, 154, 181); doc.setFontSize(10); doc.text("Votre quote-part", 20, 141);
+      doc.setTextColor(201, 168, 76); doc.setFontSize(20); doc.text(`${quotePart} €`, 20, 153);
+      doc.setTextColor(138, 154, 181); doc.setFontSize(9); doc.text("Document généré automatiquement par SyndicPro", 14, 280);
+      const pdfBase64 = doc.output("datauristring").split(",")[1];
+
+      try {
+        await fetch("/api/envoyer-email", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type: "appel_de_fonds",
+            destinataire: copro.email,
+            donnees: {
+              nom: copro.nom, prenom: copro.prenom, lot: copro.lot,
+              titreCharge: charge.titre, residence: charge.residences?.nom || "",
+              echeance: charge.date_echeance, quotePart,
+              pdfBase64, pdfNom: `appel_de_fonds_${copro.lot || copro.nom}.pdf`,
+            },
+          }),
+        });
+        envoyes++;
+      } catch (e) { console.error("Échec envoi", copro.email, e); }
+    }
+    showToast(`${envoyes} email(s) envoyé(s) ✓`, "success");
+  }
+
   if (loading) return <div className="loading">⏳ Chargement...</div>;
   return (
     <div>
@@ -585,7 +642,8 @@ function Charges({ showToast, userId }) {
                 <div className="list-content"><div className="list-title">{c.titre}</div><div className="list-sub">{c.residences?.nom} · {c.date_echeance}</div></div>
                 <div style={{ color: "var(--or-clair)", fontWeight: 600, marginRight: 8 }}>{c.montant_total} €</div>
                 <div className="list-actions">
-                  <button className="btn btn-secondary btn-sm" onClick={() => genererPDFs(c)} title="Générer les PDFs">📄</button>
+                  <button className="btn btn-secondary btn-sm" onClick={() => genererPDFs(c)} title="Télécharger les PDFs">📄</button>
+                  <button className="btn btn-secondary btn-sm" onClick={() => envoyerPDFsParEmail(c)} title="Envoyer par email">📧</button>
                   <button className="btn btn-edit btn-sm" onClick={() => openEditCharge(c)}>✏️</button>
                   <button className="btn btn-danger btn-sm" onClick={() => supprimerCharge(c.id)}>🗑️</button>
                 </div>
