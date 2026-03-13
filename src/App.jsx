@@ -339,10 +339,20 @@ function Coproprietaires({ showToast, userId }) {
   async function save() {
     if (!form.nom || !form.prenom || !form.email || !form.lot) return showToast("Remplissez tous les champs obligatoires", "error");
     const payload = { ...form, "tantièmes": parseInt(form["tantièmes"]) || 0 };
-    const { error } = editing
-      ? await supabase.from("coproprietaires").update(payload).eq("id", editing)
-      : await supabase.from("coproprietaires").insert([{ ...payload, user_id: userId }]);
-    if (error) return showToast("Erreur : " + error.message, "error");
+    if (editing) {
+      const { error } = await supabase.from("coproprietaires").update(payload).eq("id", editing);
+      if (error) return showToast("Erreur : " + error.message, "error");
+    } else {
+      const { data: inserted, error } = await supabase.from("coproprietaires").insert([{ ...payload, user_id: userId }]).select().single();
+      if (error) return showToast("Erreur : " + error.message, "error");
+      if (inserted && form.email) {
+        await fetch("/api/inviter-copro", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: form.email, copro_id: inserted.id, prenom: form.prenom, nom: form.nom, role: "coproprietaire" }),
+        });
+      }
+    }
     showToast(editing ? "Copropriétaire mis à jour ✓" : "Copropriétaire ajouté ✓", "success");
     closeModal(); load();
   }
@@ -413,6 +423,31 @@ function Coproprietaires({ showToast, userId }) {
   );
 }
 
+function buildAppalDeFondsPDF(copro, charge, quotePart) {
+  const doc = new jsPDF();
+  doc.setFillColor(15, 27, 45); doc.rect(0, 0, 210, 40, "F");
+  doc.setTextColor(201, 168, 76); doc.setFontSize(22); doc.text("SyndicPro", 14, 18);
+  doc.setFontSize(10); doc.setTextColor(138, 154, 181);
+  doc.text("Appel de fonds — " + (charge.residences?.nom || ""), 14, 28);
+  doc.text("Réf. AF-" + charge.id.slice(0, 8).toUpperCase(), 14, 35);
+  doc.setTextColor(240, 237, 230); doc.setFontSize(13); doc.text("Destinataire", 14, 55);
+  doc.setFontSize(11); doc.setTextColor(138, 154, 181);
+  doc.text(`${copro.prenom} ${copro.nom}`, 14, 63);
+  doc.text(`Lot : ${copro.lot || "—"}  ·  Tantièmes : ${copro["tantièmes"] || 0}`, 14, 70);
+  doc.setDrawColor(30, 58, 95); doc.line(14, 78, 196, 78);
+  doc.setTextColor(240, 237, 230); doc.setFontSize(13); doc.text("Détail de l'appel de fonds", 14, 90);
+  doc.setFontSize(11); doc.setTextColor(138, 154, 181);
+  doc.text(`Objet : ${charge.titre}`, 14, 100);
+  doc.text(`Montant total : ${charge.montant_total} €`, 14, 108);
+  doc.text(`Échéance : ${charge.date_echeance || "—"}`, 14, 116);
+  doc.text(`Trimestre : ${charge.trimestre || "—"}`, 14, 124);
+  doc.setFillColor(22, 34, 54); doc.roundedRect(14, 135, 182, 30, 4, 4, "F");
+  doc.setTextColor(138, 154, 181); doc.setFontSize(10); doc.text("Votre quote-part", 20, 146);
+  doc.setTextColor(201, 168, 76); doc.setFontSize(20); doc.text(`${quotePart} €`, 20, 158);
+  doc.setTextColor(138, 154, 181); doc.setFontSize(9); doc.text("Document généré automatiquement par SyndicPro", 14, 280);
+  return doc;
+}
+
 function Charges({ showToast, userId }) {
   const [charges, setCharges] = useState([]);
   const [paiements, setPaiements] = useState([]);
@@ -427,12 +462,15 @@ function Charges({ showToast, userId }) {
   const emptyPaiement = { charge_id: "", coproprietaire_id: "", montant: "", statut: "paye", mode_paiement: "virement", date_paiement: new Date().toISOString().split("T")[0] };
   const [formCharge, setFormCharge] = useState(emptyCharge);
   const [formPaiement, setFormPaiement] = useState(emptyPaiement);
+  const [recherche, setRecherche] = useState("");
+  const [filtreResidence, setFiltreResidence] = useState("");
+  const [filtreStatut, setFiltreStatut] = useState("");
 
   async function load() {
     const [ch, p, c, r] = await Promise.all([
       supabase.from("charges").select("*, residences(nom)").order("date_echeance", { ascending: false }),
       supabase.from("paiements").select("*, coproprietaires(nom, prenom, email, lot), charges(titre)").order("created_at", { ascending: false }),
-      supabase.from("coproprietaires").select("id, nom, prenom, lot, email"),
+      supabase.from("coproprietaires").select("id, nom, prenom, lot, email, tantièmes, residence_id"),
       supabase.from("residences").select("id, nom"),
     ]);
     setCharges(ch.data || []); setPaiements(p.data || []); setCopros(c.data || []); setResidences(r.data || []); setLoading(false);
@@ -489,8 +527,19 @@ function Charges({ showToast, userId }) {
             body: JSON.stringify({ type: "recu", destinataire: copro.email, donnees: { nom: copro.nom, prenom: copro.prenom, lot: copro.lot, montant: formPaiement.montant, date: formPaiement.date_paiement } }),
           });
         }
-      } catch (e) { console.log("Email non envoyé", e); }
+      } catch (e) { console.error("Email non envoyé", e); }
     }
+  }
+
+  function calcQuotePart(chargeId, coproId) {
+    if (!chargeId || !coproId) return null;
+    const charge = charges.find(c => c.id === chargeId);
+    const copro = copros.find(c => c.id === coproId);
+    if (!charge || !copro || !charge.residence_id) return null;
+    const coprosDeLaResidence = copros.filter(c => c.residence_id === charge.residence_id);
+    const totalTantiemes = coprosDeLaResidence.reduce((s, c) => s + (c["tantièmes"] || 0), 0);
+    if (totalTantiemes === 0) return null;
+    return ((charge.montant_total * (copro["tantièmes"] || 0)) / totalTantiemes).toFixed(2);
   }
 
   async function supprimerPaiement(id) {
@@ -500,61 +549,14 @@ function Charges({ showToast, userId }) {
   }
 
   async function genererPDFs(charge) {
-    const { data: coprosRes } = await supabase
-      .from("coproprietaires")
-      .select("nom, prenom, lot, tantièmes")
-      .eq("residence_id", charge.residence_id);
+    const { data: coprosRes } = await supabase.from("coproprietaires").select("nom, prenom, lot, tantièmes").eq("residence_id", charge.residence_id);
     const liste = coprosRes || [];
     if (liste.length === 0) return showToast("Aucun copropriétaire dans cette résidence", "error");
     const totalTantiemes = liste.reduce((s, c) => s + (c["tantièmes"] || 0), 0);
     const zip = new JSZip();
     liste.forEach(copro => {
-      const doc = new jsPDF();
       const quotePart = totalTantiemes > 0 ? ((charge.montant_total * (copro["tantièmes"] || 0)) / totalTantiemes).toFixed(2) : "—";
-      // Header
-      doc.setFillColor(15, 27, 45);
-      doc.rect(0, 0, 210, 40, "F");
-      doc.setTextColor(201, 168, 76);
-      doc.setFontSize(22);
-      doc.text("SyndicPro", 14, 18);
-      doc.setFontSize(10);
-      doc.setTextColor(138, 154, 181);
-      doc.text("Appel de fonds — " + (charge.residences?.nom || ""), 14, 28);
-      doc.text("Réf. AF-" + charge.id.slice(0, 8).toUpperCase(), 14, 35);
-      // Destinataire
-      doc.setTextColor(240, 237, 230);
-      doc.setFontSize(13);
-      doc.text("Destinataire", 14, 55);
-      doc.setFontSize(11);
-      doc.setTextColor(138, 154, 181);
-      doc.text(`${copro.prenom} ${copro.nom}`, 14, 63);
-      doc.text(`Lot : ${copro.lot || "—"}  ·  Tantièmes : ${copro["tantièmes"] || 0}`, 14, 70);
-      // Séparateur
-      doc.setDrawColor(30, 58, 95);
-      doc.line(14, 78, 196, 78);
-      // Détail charge
-      doc.setTextColor(240, 237, 230);
-      doc.setFontSize(13);
-      doc.text("Détail de l'appel de fonds", 14, 90);
-      doc.setFontSize(11);
-      doc.setTextColor(138, 154, 181);
-      doc.text(`Objet : ${charge.titre}`, 14, 100);
-      doc.text(`Montant total : ${charge.montant_total} €`, 14, 108);
-      doc.text(`Échéance : ${charge.date_echeance || "—"}`, 14, 116);
-      doc.text(`Trimestre : ${charge.trimestre || "—"}`, 14, 124);
-      // Quote-part
-      doc.setFillColor(22, 34, 54);
-      doc.roundedRect(14, 135, 182, 30, 4, 4, "F");
-      doc.setTextColor(138, 154, 181);
-      doc.setFontSize(10);
-      doc.text("Votre quote-part", 20, 146);
-      doc.setTextColor(201, 168, 76);
-      doc.setFontSize(20);
-      doc.text(`${quotePart} €`, 20, 158);
-      // Pied de page
-      doc.setTextColor(138, 154, 181);
-      doc.setFontSize(9);
-      doc.text("Document généré automatiquement par SyndicPro", 14, 280);
+      const doc = buildAppalDeFondsPDF(copro, charge, quotePart);
       zip.file(`${copro.lot || copro.nom}_${charge.titre}.pdf`, doc.output("arraybuffer"));
     });
     const blob = await zip.generateAsync({ type: "blob" });
@@ -566,41 +568,15 @@ function Charges({ showToast, userId }) {
   }
 
   async function envoyerPDFsParEmail(charge) {
-    const { data: coprosRes } = await supabase
-      .from("coproprietaires")
-      .select("nom, prenom, email, lot, tantièmes")
-      .eq("residence_id", charge.residence_id);
+    const { data: coprosRes } = await supabase.from("coproprietaires").select("nom, prenom, email, lot, tantièmes").eq("residence_id", charge.residence_id);
     const liste = (coprosRes || []).filter(c => c.email);
     if (liste.length === 0) return showToast("Aucun copropriétaire avec email dans cette résidence", "error");
     const totalTantiemes = liste.reduce((s, c) => s + (c["tantièmes"] || 0), 0);
-
     showToast(`Envoi en cours… 0 / ${liste.length}`, "success");
     let envoyes = 0;
     for (const copro of liste) {
       const quotePart = totalTantiemes > 0 ? ((charge.montant_total * (copro["tantièmes"] || 0)) / totalTantiemes).toFixed(2) : "0.00";
-      // Générer le PDF
-      const doc = new jsPDF();
-      doc.setFillColor(15, 27, 45); doc.rect(0, 0, 210, 40, "F");
-      doc.setTextColor(201, 168, 76); doc.setFontSize(22); doc.text("SyndicPro", 14, 18);
-      doc.setFontSize(10); doc.setTextColor(138, 154, 181);
-      doc.text("Appel de fonds — " + (charge.residences?.nom || ""), 14, 28);
-      doc.text("Réf. AF-" + charge.id.slice(0, 8).toUpperCase(), 14, 35);
-      doc.setTextColor(240, 237, 230); doc.setFontSize(13); doc.text("Destinataire", 14, 55);
-      doc.setFontSize(11); doc.setTextColor(138, 154, 181);
-      doc.text(`${copro.prenom} ${copro.nom}`, 14, 63);
-      doc.text(`Lot : ${copro.lot || "—"}  ·  Tantièmes : ${copro["tantièmes"] || 0}`, 14, 70);
-      doc.setDrawColor(30, 58, 95); doc.line(14, 78, 196, 78);
-      doc.setTextColor(240, 237, 230); doc.setFontSize(13); doc.text("Détail de l'appel de fonds", 14, 90);
-      doc.setFontSize(11); doc.setTextColor(138, 154, 181);
-      doc.text(`Objet : ${charge.titre}`, 14, 100);
-      doc.text(`Montant total : ${charge.montant_total} €`, 14, 108);
-      doc.text(`Échéance : ${charge.date_echeance || "—"}`, 14, 116);
-      doc.setFillColor(22, 34, 54); doc.roundedRect(14, 130, 182, 30, 4, 4, "F");
-      doc.setTextColor(138, 154, 181); doc.setFontSize(10); doc.text("Votre quote-part", 20, 141);
-      doc.setTextColor(201, 168, 76); doc.setFontSize(20); doc.text(`${quotePart} €`, 20, 153);
-      doc.setTextColor(138, 154, 181); doc.setFontSize(9); doc.text("Document généré automatiquement par SyndicPro", 14, 280);
-      const pdfBase64 = doc.output("datauristring").split(",")[1];
-
+      const pdfBase64 = buildAppalDeFondsPDF(copro, charge, quotePart).output("datauristring").split(",")[1];
       try {
         await fetch("/api/envoyer-email", {
           method: "POST",
@@ -608,12 +584,7 @@ function Charges({ showToast, userId }) {
           body: JSON.stringify({
             type: "appel_de_fonds",
             destinataire: copro.email,
-            donnees: {
-              nom: copro.nom, prenom: copro.prenom, lot: copro.lot,
-              titreCharge: charge.titre, residence: charge.residences?.nom || "",
-              echeance: charge.date_echeance, quotePart,
-              pdfBase64, pdfNom: `appel_de_fonds_${copro.lot || copro.nom}.pdf`,
-            },
+            donnees: { nom: copro.nom, prenom: copro.prenom, lot: copro.lot, titreCharge: charge.titre, residence: charge.residences?.nom || "", echeance: charge.date_echeance, quotePart, pdfBase64, pdfNom: `appel_de_fonds_${copro.lot || copro.nom}.pdf` },
           }),
         });
         envoyes++;
@@ -623,62 +594,159 @@ function Charges({ showToast, userId }) {
   }
 
   if (loading) return <div className="loading">⏳ Chargement...</div>;
+
+  const totalAppele = charges.reduce((s, c) => s + (parseFloat(c.montant_total) || 0), 0);
+  const totalEncaisse = paiements.filter(p => p.statut === "paye").reduce((s, p) => s + (parseFloat(p.montant) || 0), 0);
+  const totalImpaye = paiements.filter(p => p.statut === "impaye" || p.statut === "en_attente").reduce((s, p) => s + (parseFloat(p.montant) || 0), 0);
+
   return (
     <div>
       <div className="topbar">
-        <div><div className="page-title">💰 Charges & Paiements</div><div className="page-sub">{charges.length} appel(s) · {paiements.length} paiement(s)</div></div>
+        <div><div className="page-title">💰 Charges & Paiements</div><div className="page-sub">{charges.length} appel(s) de fonds · {paiements.length} paiement(s)</div></div>
         <div style={{ display: "flex", gap: 10 }}>
           <button className="btn btn-secondary" onClick={openCreateCharge}>+ Appel de fonds</button>
           <button className="btn btn-primary" onClick={openCreatePaiement}>+ Paiement</button>
         </div>
       </div>
-      <div className="grid-2">
-        <div className="card">
-          <div className="card-header"><span className="card-title">📋 Appels de fonds</span></div>
-          {charges.length === 0 ? <div className="empty"><div className="empty-icon">📄</div><div className="empty-text">Aucun appel de fonds</div></div> :
-            charges.map(c => (
-              <div className="list-item" key={c.id}>
-                <div className="list-icon">💰</div>
-                <div className="list-content"><div className="list-title">{c.titre}</div><div className="list-sub">{c.residences?.nom} · {c.date_echeance}</div></div>
-                <div style={{ color: "var(--or-clair)", fontWeight: 600, marginRight: 8 }}>{c.montant_total} €</div>
-                <div className="list-actions">
-                  <button className="btn btn-secondary btn-sm" onClick={() => genererPDFs(c)} title="Télécharger les PDFs">📄</button>
-                  <button className="btn btn-secondary btn-sm" onClick={() => envoyerPDFsParEmail(c)} title="Envoyer par email">📧</button>
-                  <button className="btn btn-edit btn-sm" onClick={() => openEditCharge(c)}>✏️</button>
-                  <button className="btn btn-danger btn-sm" onClick={() => supprimerCharge(c.id)}>🗑️</button>
-                </div>
-              </div>
-            ))
-          }
-        </div>
-        <div className="card">
-          <div className="card-header"><span className="card-title">💳 Paiements</span></div>
-          {paiements.length === 0 ? <div className="empty"><div className="empty-icon">💳</div><div className="empty-text">Aucun paiement</div></div> : (
-            <div className="table-wrap"><table>
-              <thead><tr><th>Copropriétaire</th><th>Montant</th><th>Statut</th><th></th></tr></thead>
-              <tbody>{paiements.map(p => (
-                <tr key={p.id}>
-                  <td>{p.coproprietaires ? `${p.coproprietaires.prenom} ${p.coproprietaires.nom}` : "—"}</td>
-                  <td style={{ color: "var(--or-clair)", fontWeight: 600 }}>{p.montant} €</td>
-                  <td><Badge statut={p.statut} /></td>
-                  <td>
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <button className="btn btn-edit btn-sm" onClick={() => openEditPaiement(p)}>✏️</button>
-                      <button className="btn btn-danger btn-sm" onClick={async () => {
-                        const copro = p.coproprietaires;
-                        if (!copro?.email) return showToast("Email manquant", "error");
-                        await fetch("/api/envoyer-email", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "relance", destinataire: copro.email, donnees: { nom: copro.nom, prenom: copro.prenom, lot: copro.lot, montant: p.montant } }) });
-                        showToast("Relance envoyée ✓", "success");
-                      }}>📧 Relance</button>
-                      <button className="btn btn-danger btn-sm" onClick={() => supprimerPaiement(p.id)}>🗑️</button>
-                    </div>
-                  </td>
-                </tr>
-              ))}</tbody>
-            </table></div>
-          )}
-        </div>
+
+      <div className="stats-grid" style={{ gridTemplateColumns: "repeat(3,1fr)", marginBottom: 24 }}>
+        <div className="stat-card"><div className="stat-label">Total appelé</div><div className="stat-value" style={{ color: "var(--or-clair)" }}>{totalAppele.toFixed(2)} €</div></div>
+        <div className="stat-card"><div className="stat-label">Encaissé</div><div className="stat-value" style={{ color: "var(--vert)" }}>{totalEncaisse.toFixed(2)} €</div></div>
+        <div className="stat-card"><div className="stat-label">En attente / Impayé</div><div className="stat-value" style={{ color: totalImpaye > 0 ? "var(--rouge)" : "var(--vert)" }}>{totalImpaye.toFixed(2)} €</div></div>
       </div>
+
+      <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
+        <div className="search-bar" style={{ flex: 1, minWidth: 200, marginBottom: 0 }}>
+          <span style={{ color: "var(--gris)" }}>🔍</span>
+          <input placeholder="Rechercher par titre, copropriétaire…" value={recherche} onChange={e => setRecherche(e.target.value)} />
+        </div>
+        <select className="form-input" style={{ width: "auto" }} value={filtreResidence} onChange={e => setFiltreResidence(e.target.value)}>
+          <option value="">Toutes les résidences</option>
+          {residences.map(r => <option key={r.id} value={r.id}>{r.nom}</option>)}
+        </select>
+        <select className="form-input" style={{ width: "auto" }} value={filtreStatut} onChange={e => setFiltreStatut(e.target.value)}>
+          <option value="">Tous les statuts</option>
+          <option value="non_enregistre">Non enregistré</option>
+          <option value="paye">Payé</option>
+          <option value="en_attente">En attente</option>
+          <option value="impaye">Impayé</option>
+          <option value="partiel">Partiel</option>
+        </select>
+        {(recherche || filtreResidence || filtreStatut) &&
+          <button className="btn btn-secondary" onClick={() => { setRecherche(""); setFiltreResidence(""); setFiltreStatut(""); }}>✕ Réinitialiser</button>
+        }
+      </div>
+
+      {(() => {
+        if (charges.length === 0) return <div className="card"><div className="empty"><div className="empty-icon">📄</div><div className="empty-text">Aucun appel de fonds — cliquez sur "+ Appel de fonds"</div></div></div>;
+        const chargesFiltrees = charges
+          .filter(charge => {
+            if (filtreResidence && charge.residence_id !== filtreResidence) return false;
+            const q = recherche.toLowerCase();
+            if (!q) return true;
+            const nomsCopros = copros.filter(c => c.residence_id === charge.residence_id).map(c => `${c.prenom} ${c.nom} ${c.lot}`).join(" ").toLowerCase();
+            return charge.titre.toLowerCase().includes(q) || (charge.residences?.nom || "").toLowerCase().includes(q) || nomsCopros.includes(q);
+          })
+          .filter(charge => {
+            if (!filtreStatut) return true;
+            const paiementsCharge = paiements.filter(p => p.charge_id === charge.id);
+            const coprosDeLaResidence = copros.filter(c => c.residence_id === charge.residence_id);
+            if (filtreStatut === "non_enregistre") return coprosDeLaResidence.some(c => !paiementsCharge.find(p => p.coproprietaire_id === c.id));
+            return paiementsCharge.some(p => p.statut === filtreStatut);
+          });
+        if (chargesFiltrees.length === 0) return <div className="card"><div className="empty"><div className="empty-text">Aucun résultat pour ces filtres</div></div></div>;
+        return chargesFiltrees.map(charge => {
+            const coprosDeLaResidence = copros.filter(c => c.residence_id === charge.residence_id);
+            const totalTantiemes = coprosDeLaResidence.reduce((s, c) => s + (c["tantièmes"] || 0), 0);
+            const paiementsCharge = paiements.filter(p => p.charge_id === charge.id);
+            const encaisseCharge = paiementsCharge.filter(p => p.statut === "paye").reduce((s, p) => s + parseFloat(p.montant || 0), 0);
+            return (
+              <div className="card" key={charge.id} style={{ marginBottom: 16 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16, flexWrap: "wrap", gap: 10 }}>
+                  <div>
+                    <div style={{ fontSize: 16, fontWeight: 600 }}>{charge.titre}</div>
+                    <div style={{ fontSize: 12, color: "var(--gris)", marginTop: 3 }}>
+                      🏢 {charge.residences?.nom || "—"} · 📅 Échéance : {charge.date_echeance || "—"}
+                      {charge.trimestre && ` · ${charge.trimestre}`}
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                    <div style={{ textAlign: "right" }}>
+                      <div style={{ fontSize: 20, fontWeight: 700, color: "var(--or-clair)" }}>{parseFloat(charge.montant_total).toFixed(2)} €</div>
+                      <div style={{ fontSize: 11, color: "var(--vert)" }}>Encaissé : {encaisseCharge.toFixed(2)} €</div>
+                    </div>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button className="btn btn-secondary btn-sm" onClick={() => genererPDFs(charge)} title="Télécharger les PDFs">📄</button>
+                      <button className="btn btn-secondary btn-sm" onClick={() => envoyerPDFsParEmail(charge)} title="Envoyer par email">📧</button>
+                      <button className="btn btn-edit btn-sm" onClick={() => openEditCharge(charge)}>✏️</button>
+                      <button className="btn btn-danger btn-sm" onClick={() => supprimerCharge(charge.id)}>🗑️</button>
+                    </div>
+                  </div>
+                </div>
+
+                {coprosDeLaResidence.length === 0
+                  ? <div className="empty" style={{ padding: "12px 0" }}><div className="empty-text">Aucun copropriétaire dans cette résidence</div></div>
+                  : <div className="table-wrap">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Copropriétaire</th>
+                            <th>Lot</th>
+                            <th>Tantièmes</th>
+                            <th>Quote-part</th>
+                            <th>Statut</th>
+                            <th>Payé le</th>
+                            <th></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {coprosDeLaResidence.map(copro => {
+                            const quotePart = totalTantiemes > 0 ? ((charge.montant_total * (copro["tantièmes"] || 0)) / totalTantiemes).toFixed(2) : "—";
+                            const paiement = paiementsCharge.find(p => p.coproprietaire_id === copro.id);
+                            return (
+                              <tr key={copro.id}>
+                                <td style={{ fontWeight: 500 }}>{copro.prenom} {copro.nom}</td>
+                                <td style={{ color: "var(--gris)" }}>{copro.lot || "—"}</td>
+                                <td style={{ color: "var(--gris)" }}>{copro["tantièmes"] || 0}</td>
+                                <td style={{ color: "var(--or-clair)", fontWeight: 600 }}>{quotePart} €</td>
+                                <td>{paiement ? <Badge statut={paiement.statut} /> : <span className="badge badge-gray">Non enregistré</span>}</td>
+                                <td style={{ color: "var(--gris)", fontSize: 12 }}>{paiement?.date_paiement || "—"}</td>
+                                <td>
+                                  <div style={{ display: "flex", gap: 6 }}>
+                                    {paiement
+                                      ? <>
+                                          <button className="btn btn-edit btn-sm" onClick={() => openEditPaiement(paiement)}>✏️</button>
+                                          {(paiement.statut === "impaye" || paiement.statut === "en_attente") && copro.email &&
+                                            <button className="btn btn-danger btn-sm" onClick={async () => {
+                                              try {
+                                                const r = await fetch("/api/envoyer-email", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "relance", destinataire: copro.email, donnees: { nom: copro.nom, prenom: copro.prenom, lot: copro.lot, montant: paiement.montant } }) });
+                                                const j = await r.json();
+                                                if (!r.ok) showToast("Erreur : " + j.error, "error");
+                                                else showToast("Relance envoyée ✓", "success");
+                                              } catch { showToast("Erreur d'envoi", "error"); }
+                                            }}>📧</button>
+                                          }
+                                          <button className="btn btn-danger btn-sm" onClick={() => supprimerPaiement(paiement.id)}>🗑️</button>
+                                        </>
+                                      : <button className="btn btn-primary btn-sm" onClick={() => {
+                                          setFormPaiement({ ...emptyPaiement, charge_id: charge.id, coproprietaire_id: copro.id, montant: quotePart !== "—" ? quotePart : "" });
+                                          setEditingPaiement(null);
+                                          setModalPaiement(true);
+                                        }}>+ Paiement</button>
+                                    }
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                }
+              </div>
+            );
+          });
+      })()}
       {modalCharge && <Modal title={editingCharge ? "✏️ Modifier l'appel de fonds" : "📋 Nouvel appel de fonds"} onClose={closeModalCharge}>
         <div className="form-group"><label className="form-label">Titre *</label><input className="form-input" value={formCharge.titre} onChange={e => setFormCharge({ ...formCharge, titre: e.target.value })} /></div>
         <div className="form-row">
@@ -694,22 +762,43 @@ function Charges({ showToast, userId }) {
         <div className="modal-actions"><button className="btn btn-secondary" onClick={closeModalCharge}>Annuler</button><button className="btn btn-primary" onClick={saveCharge}>✅ {editingCharge ? "Mettre à jour" : "Créer"}</button></div>
       </Modal>}
       {modalPaiement && <Modal title={editingPaiement ? "✏️ Modifier le paiement" : "💳 Enregistrer un paiement"} onClose={closeModalPaiement}>
-        <div className="form-group"><label className="form-label">Appel de fonds *</label>
-          <select className="form-input" value={formPaiement.charge_id} onChange={e => setFormPaiement({ ...formPaiement, charge_id: e.target.value })}>
-            <option value="">Sélectionner...</option>
-            {charges.map(c => <option key={c.id} value={c.id}>{c.titre}</option>)}
-          </select>
-        </div>
-        <div className="form-group"><label className="form-label">Copropriétaire *</label>
-          <select className="form-input" value={formPaiement.coproprietaire_id} onChange={e => setFormPaiement({ ...formPaiement, coproprietaire_id: e.target.value })}>
-            <option value="">Sélectionner...</option>
-            {copros.map(c => <option key={c.id} value={c.id}>{c.prenom} {c.nom} — {c.lot}</option>)}
-          </select>
-        </div>
-        <div className="form-row">
-          <div className="form-group"><label className="form-label">Montant *</label><input className="form-input" type="number" value={formPaiement.montant} onChange={e => setFormPaiement({ ...formPaiement, montant: e.target.value })} /></div>
-          <div className="form-group"><label className="form-label">Date</label><input className="form-input" type="date" value={formPaiement.date_paiement} onChange={e => setFormPaiement({ ...formPaiement, date_paiement: e.target.value })} /></div>
-        </div>
+        {(() => {
+          const chargeSelectionnee = charges.find(c => c.id === formPaiement.charge_id);
+          const coprosFiltrés = chargeSelectionnee ? copros.filter(c => c.residence_id === chargeSelectionnee.residence_id) : copros;
+          const quotePart = calcQuotePart(formPaiement.charge_id, formPaiement.coproprietaire_id);
+          return (
+            <>
+              <div className="form-group"><label className="form-label">Appel de fonds *</label>
+                <select className="form-input" value={formPaiement.charge_id} onChange={e => {
+                  const chargeId = e.target.value;
+                  const qp = calcQuotePart(chargeId, formPaiement.coproprietaire_id);
+                  setFormPaiement({ ...formPaiement, charge_id: chargeId, coproprietaire_id: "", ...(qp ? { montant: qp } : { montant: "" }) });
+                }}>
+                  <option value="">Sélectionner...</option>
+                  {charges.map(c => <option key={c.id} value={c.id}>{c.titre} — {c.montant_total} €</option>)}
+                </select>
+              </div>
+              <div className="form-group"><label className="form-label">Copropriétaire *</label>
+                <select className="form-input" value={formPaiement.coproprietaire_id} onChange={e => {
+                  const coproId = e.target.value;
+                  const qp = calcQuotePart(formPaiement.charge_id, coproId);
+                  setFormPaiement({ ...formPaiement, coproprietaire_id: coproId, ...(qp ? { montant: qp } : {}) });
+                }}>
+                  <option value="">{chargeSelectionnee ? "Sélectionner..." : "Choisissez d'abord un appel de fonds"}</option>
+                  {coprosFiltrés.map(c => <option key={c.id} value={c.id}>{c.prenom} {c.nom} — Lot {c.lot} ({c["tantièmes"] || 0} tantièmes)</option>)}
+                </select>
+              </div>
+              <div className="form-row">
+                <div className="form-group">
+                  <label className="form-label">Montant *</label>
+                  <input className="form-input" type="number" value={formPaiement.montant} onChange={e => setFormPaiement({ ...formPaiement, montant: e.target.value })} />
+                  {quotePart && <div style={{ fontSize: 11, color: "var(--or)", marginTop: 5 }}>Quote-part calculée : {quotePart} €</div>}
+                </div>
+                <div className="form-group"><label className="form-label">Date</label><input className="form-input" type="date" value={formPaiement.date_paiement} onChange={e => setFormPaiement({ ...formPaiement, date_paiement: e.target.value })} /></div>
+              </div>
+            </>
+          );
+        })()}
         <div className="form-row">
           <div className="form-group"><label className="form-label">Statut</label>
             <select className="form-input" value={formPaiement.statut} onChange={e => setFormPaiement({ ...formPaiement, statut: e.target.value })}>
@@ -1799,6 +1888,263 @@ function Documents({ showToast, userId }) {
   );
 }
 
+function EspaceCopro({ profil, showToast }) {
+  const [tab, setTab] = useState("solde");
+  const [paiements, setPaiements] = useState([]);
+  const [documents, setDocuments] = useState([]);
+  const [travaux, setTravaux] = useState([]);
+  const [assemblees, setAssemblees] = useState([]);
+  const [copro, setCopro] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function load() {
+      const coproId = profil.copro_id;
+      if (!coproId) { setLoading(false); return; }
+      const [c, p, t, a] = await Promise.all([
+        supabase.from("coproprietaires").select("*, residences(nom)").eq("id", coproId).single(),
+        supabase.from("paiements").select("*, charges(titre)").eq("coproprietaire_id", coproId).order("created_at", { ascending: false }),
+        supabase.from("travaux").select("*").order("created_at", { ascending: false }).limit(10),
+        supabase.from("assemblees").select("*").order("date_ag", { ascending: false }).limit(10),
+      ]);
+      setCopro(c.data);
+      setPaiements(p.data || []);
+      setTravaux(t.data || []);
+      setAssemblees(a.data || []);
+      if (c.data?.residences?.nom) {
+        const { data: files } = await supabase.storage.from("documents").list(c.data.residences.nom, { limit: 50 });
+        setDocuments(files || []);
+      }
+      setLoading(false);
+    }
+    load();
+  }, [profil.copro_id]);
+
+  if (loading) return <div className="loading">⏳ Chargement...</div>;
+
+  const tabs = [
+    { id: "solde", label: "💰 Mon solde" },
+    { id: "documents", label: "📁 Documents" },
+    { id: "travaux", label: "🔧 Travaux" },
+    { id: "assemblees", label: "📋 Assemblées" },
+  ];
+
+  const solde = paiements.reduce((acc, p) => p.statut === "paye" ? acc + parseFloat(p.montant || 0) : acc, 0);
+  const impayes = paiements.filter(p => p.statut === "impaye" || p.statut === "en_attente");
+
+  return (
+    <div>
+      <div className="topbar">
+        <div>
+          <div className="page-title">Mon Espace</div>
+          <div className="page-sub">{copro ? `Lot ${copro.lot} — ${copro.residences?.nom || ""}` : "Bienvenue"}</div>
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
+        {tabs.map(t => (
+          <button key={t.id} className={`btn ${tab === t.id ? "btn-primary" : "btn-secondary"}`} onClick={() => setTab(t.id)}>{t.label}</button>
+        ))}
+      </div>
+
+      {tab === "solde" && (
+        <div>
+          <div className="stats-grid" style={{ gridTemplateColumns: "repeat(3,1fr)" }}>
+            <div className="stat-card"><div className="stat-label">Paiements effectués</div><div className="stat-value" style={{ color: "var(--vert)" }}>{solde.toFixed(2)} €</div></div>
+            <div className="stat-card"><div className="stat-label">En attente / Impayés</div><div className="stat-value" style={{ color: impayes.length > 0 ? "var(--rouge)" : "var(--vert)" }}>{impayes.length}</div></div>
+            <div className="stat-card"><div className="stat-label">Total transactions</div><div className="stat-value">{paiements.length}</div></div>
+          </div>
+          <div className="card" style={{ marginTop: 16 }}>
+            <div className="card-header"><span className="card-title">Historique des paiements</span></div>
+            {paiements.length === 0 ? <div className="empty"><div className="empty-text">Aucun paiement enregistré</div></div> : (
+              <div className="table-wrap">
+                <table><thead><tr><th>Charge</th><th>Montant</th><th>Statut</th><th>Date</th></tr></thead>
+                  <tbody>{paiements.map(p => (
+                    <tr key={p.id}>
+                      <td>{p.charges?.titre || "—"}</td>
+                      <td style={{ color: "var(--or-clair)", fontWeight: 600 }}>{p.montant} €</td>
+                      <td><Badge statut={p.statut} /></td>
+                      <td style={{ color: "var(--gris)" }}>{p.created_at ? new Date(p.created_at).toLocaleDateString("fr-FR") : "—"}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {tab === "documents" && (
+        <div className="card">
+          <div className="card-header"><span className="card-title">Documents de ma résidence</span></div>
+          {documents.length === 0 ? <div className="empty"><div className="empty-icon">📁</div><div className="empty-text">Aucun document disponible</div></div> : (
+            <div>{documents.map(f => (
+              <div key={f.name} className="list-item">
+                <div className="list-icon">📄</div>
+                <div className="list-content"><div className="list-title">{f.name}</div></div>
+                <button className="btn btn-secondary btn-sm" onClick={async () => {
+                  const path = `${copro.residences.nom}/${f.name}`;
+                  const { data } = await supabase.storage.from("documents").download(path);
+                  const url = URL.createObjectURL(data);
+                  const a = document.createElement("a"); a.href = url; a.download = f.name; a.click();
+                }}>⬇️ Télécharger</button>
+              </div>
+            ))}</div>
+          )}
+        </div>
+      )}
+
+      {tab === "travaux" && (
+        <div className="card">
+          <div className="card-header"><span className="card-title">Travaux en cours</span></div>
+          {travaux.length === 0 ? <div className="empty"><div className="empty-text">Aucun travaux</div></div> : (
+            <div className="table-wrap">
+              <table><thead><tr><th>Titre</th><th>Statut</th><th>Montant</th></tr></thead>
+                <tbody>{travaux.map(t => (
+                  <tr key={t.id}>
+                    <td>{t.titre}</td>
+                    <td><Badge statut={t.statut} /></td>
+                    <td>{t.montant ? `${t.montant} €` : "—"}</td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {tab === "assemblees" && (
+        <div className="card">
+          <div className="card-header"><span className="card-title">Assemblées générales</span></div>
+          {assemblees.length === 0 ? <div className="empty"><div className="empty-text">Aucune assemblée</div></div> : (
+            <div className="table-wrap">
+              <table><thead><tr><th>Titre</th><th>Date</th><th>Type</th><th>Statut</th></tr></thead>
+                <tbody>{assemblees.map(a => (
+                  <tr key={a.id}>
+                    <td>{a.titre}</td>
+                    <td>{a.date_ag ? new Date(a.date_ag).toLocaleDateString("fr-FR") : "—"}</td>
+                    <td><Badge statut={a.type_ag} /></td>
+                    <td><Badge statut={a.statut} /></td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Equipe({ showToast }) {
+  const [profils, setProfils] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [modalInvite, setModalInvite] = useState(false);
+  const [formInvite, setFormInvite] = useState({ email: "", prenom: "", nom: "", role: "gestionnaire" });
+  const [inviting, setInviting] = useState(false);
+
+  async function load() {
+    const { data } = await supabase.from("profiles").select("*").order("role");
+    setProfils(data || []);
+    setLoading(false);
+  }
+
+  useEffect(() => { load(); }, []);
+
+  async function changerRole(id, role) {
+    await supabase.from("profiles").update({ role }).eq("id", id);
+    showToast("Rôle mis à jour ✓");
+    load();
+  }
+
+  async function inviter() {
+    if (!formInvite.email) return showToast("Email requis", "error");
+    setInviting(true);
+    const res = await fetch("/api/inviter-copro", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...formInvite }),
+    });
+    const json = await res.json();
+    setInviting(false);
+    if (!res.ok) return showToast("Erreur : " + json.error, "error");
+    showToast("Invitation envoyée ✓");
+    setModalInvite(false);
+    setFormInvite({ email: "", prenom: "", nom: "", role: "gestionnaire" });
+    load();
+  }
+
+  const roleLabel = { admin: "Admin", gestionnaire: "Gestionnaire", coproprietaire: "Copropriétaire" };
+  const roleBadge = { admin: "badge-red", gestionnaire: "badge-blue", coproprietaire: "badge-green" };
+
+  if (loading) return <div className="loading">⏳ Chargement...</div>;
+
+  return (
+    <div>
+      <div className="topbar">
+        <div><div className="page-title">👨‍💼 Équipe</div><div className="page-sub">{profils.length} membre(s)</div></div>
+        <button className="btn btn-primary" onClick={() => setModalInvite(true)}>+ Inviter</button>
+      </div>
+      <div className="card">
+        {profils.length === 0 ? <div className="empty"><div className="empty-text">Aucun membre</div></div> : (
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>Nom</th><th>Rôle</th><th>Changer le rôle</th></tr></thead>
+              <tbody>
+                {profils.map(p => (
+                  <tr key={p.id}>
+                    <td>
+                      <div style={{ fontWeight: 600 }}>{p.prenom && p.nom ? `${p.prenom} ${p.nom}` : "—"}</div>
+                      <div style={{ fontSize: 11, color: "var(--gris)" }}>{p.id}</div>
+                    </td>
+                    <td><span className={`badge ${roleBadge[p.role] || "badge-gray"}`}>{roleLabel[p.role] || p.role}</span></td>
+                    <td>
+                      <select value={p.role} onChange={e => changerRole(p.id, e.target.value)} className="form-input" style={{ width: "auto", padding: "4px 8px", fontSize: 12 }}>
+                        <option value="admin">Admin</option>
+                        <option value="gestionnaire">Gestionnaire</option>
+                        <option value="coproprietaire">Copropriétaire</option>
+                      </select>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+      {modalInvite && (
+        <Modal title="Inviter un membre" onClose={() => setModalInvite(false)}>
+          <div className="form-group">
+            <label className="form-label">Email *</label>
+            <input className="form-input" type="email" value={formInvite.email} onChange={e => setFormInvite(f => ({ ...f, email: e.target.value }))} placeholder="email@exemple.fr" />
+          </div>
+          <div className="form-row">
+            <div className="form-group">
+              <label className="form-label">Prénom</label>
+              <input className="form-input" value={formInvite.prenom} onChange={e => setFormInvite(f => ({ ...f, prenom: e.target.value }))} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Nom</label>
+              <input className="form-input" value={formInvite.nom} onChange={e => setFormInvite(f => ({ ...f, nom: e.target.value }))} />
+            </div>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Rôle</label>
+            <select className="form-input" value={formInvite.role} onChange={e => setFormInvite(f => ({ ...f, role: e.target.value }))}>
+              <option value="gestionnaire">Gestionnaire</option>
+              <option value="admin">Admin</option>
+              <option value="coproprietaire">Copropriétaire</option>
+            </select>
+          </div>
+          <div className="modal-actions">
+            <button className="btn btn-secondary" onClick={() => setModalInvite(false)}>Annuler</button>
+            <button className="btn btn-primary" onClick={inviter} disabled={inviting}>{inviting ? "Envoi…" : "Envoyer l'invitation"}</button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
 function Login() {
   const [mode, setMode] = useState("login");
   const [email, setEmail] = useState("");
@@ -1807,20 +2153,13 @@ function Login() {
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
 
-  function switchMode(m) {
-    setMode(m);
-    setError(null);
-    setSuccess(null);
-    setEmail("");
-    setPassword("");
-  }
+  function switchMode(m) { setMode(m); setError(null); setSuccess(null); setEmail(""); setPassword(""); }
 
   async function handleSubmit(e) {
     e.preventDefault();
     setLoading(true);
     setError(null);
     setSuccess(null);
-
     if (mode === "login") {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) setError(error.message);
@@ -1829,7 +2168,6 @@ function Login() {
       if (error) setError(error.message);
       else setSuccess("Compte créé ! Vérifiez votre email pour confirmer votre inscription.");
     }
-
     setLoading(false);
   }
 
@@ -1860,7 +2198,9 @@ function Login() {
               <input type="email" value={email} onChange={e => setEmail(e.target.value)} required placeholder="syndic@exemple.fr" style={inputStyle} />
             </div>
             <div style={{ marginBottom: 24 }}>
-              <label style={{ display: "block", color: "var(--gris)", fontSize: 13, marginBottom: 6 }}>Mot de passe{mode === "register" && <span style={{ color: "var(--gris)", fontWeight: 400 }}> (6 caractères min.)</span>}</label>
+              <label style={{ display: "block", color: "var(--gris)", fontSize: 13, marginBottom: 6 }}>
+                Mot de passe{mode === "register" && <span style={{ color: "var(--gris)", fontWeight: 400 }}> (6 caractères min.)</span>}
+              </label>
               <input type="password" value={password} onChange={e => setPassword(e.target.value)} required placeholder="••••••••" style={inputStyle} />
             </div>
 
@@ -1873,11 +2213,10 @@ function Login() {
           </form>
 
           <div style={{ textAlign: "center", marginTop: 20, fontSize: 13, color: "var(--gris)" }}>
-            {mode === "login" ? (
-              <>Pas encore de compte ?{" "}<span onClick={() => switchMode("register")} style={{ color: "var(--or)", cursor: "pointer" }}>S'inscrire</span></>
-            ) : (
-              <>Déjà un compte ?{" "}<span onClick={() => switchMode("login")} style={{ color: "var(--or)", cursor: "pointer" }}>Se connecter</span></>
-            )}
+            {mode === "login"
+              ? <><span>Pas encore de compte ?{" "}</span><span onClick={() => switchMode("register")} style={{ color: "var(--or)", cursor: "pointer" }}>S'inscrire</span></>
+              : <><span>Déjà un compte ?{" "}</span><span onClick={() => switchMode("login")} style={{ color: "var(--or)", cursor: "pointer" }}>Se connecter</span></>
+            }
           </div>
 
         </div>
@@ -1888,20 +2227,77 @@ function Login() {
 
 export default function App() {
   const [session, setSession] = useState(undefined);
+  const [profil, setProfil] = useState(null);
   const [page, setPage] = useState("dashboard");
   const [toast, setToast] = useState(null);
   function showToast(message, type = "success") { setToast({ message, type }); }
 
+  async function loadProfil(userId) {
+    const { data } = await supabase.from("profiles").select("*").eq("id", userId).single();
+    setProfil(data || { role: "admin" });
+  }
+
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => setSession(session));
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => setSession(session));
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      if (session) loadProfil(session.user.id);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+      if (session) loadProfil(session.user.id);
+      else setProfil(null);
+    });
     return () => subscription.unsubscribe();
   }, []);
 
-  if (session === undefined) return null;
+  if (session === undefined || (session && !profil)) return (
+    <>
+      <style>{styles}</style>
+      <div style={{ position: "fixed", inset: 0, background: "var(--bleu-nuit)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--gris)", fontSize: 14 }}>
+        ⏳ Chargement…
+      </div>
+    </>
+  );
   if (!session) return <Login />;
 
   const userId = session.user.id;
+  const role = profil.role;
+  const initiales = session.user.email.slice(0, 2).toUpperCase();
+  const roleLabels = { admin: "Administrateur", gestionnaire: "Gestionnaire", coproprietaire: "Copropriétaire" };
+
+  const sidebarUser = (
+    <div className="sidebar-user">
+      <div className="avatar">{initiales}</div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div className="user-name" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{session.user.email}</div>
+        <div className="user-role">{roleLabels[role] || role}</div>
+      </div>
+      <button onClick={() => supabase.auth.signOut()} title="Déconnexion" style={{ background: "none", border: "none", color: "var(--gris)", cursor: "pointer", fontSize: 18, padding: "4px", flexShrink: 0 }}>⏻</button>
+    </div>
+  );
+
+  // — Espace copropriétaire —
+  if (role === "coproprietaire") {
+    return (
+      <>
+        <style>{styles}</style>
+        <div className="app">
+          <aside className="sidebar">
+            <div className="sidebar-logo"><div className="logo-title">SyndicPro</div><div className="logo-sub">Mon espace</div></div>
+            <nav className="nav">
+              <div className="nav-label">Mon espace</div>
+              <div className="nav-item active"><span>🏠</span>Tableau de bord</div>
+            </nav>
+            {sidebarUser}
+          </aside>
+          <main className="main"><EspaceCopro profil={profil} showToast={showToast} /></main>
+          {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+        </div>
+      </>
+    );
+  }
+
+  // — Admin & Gestionnaire —
   const pages = {
     dashboard: <Dashboard />,
     residences: <Residences showToast={showToast} userId={userId} />,
@@ -1913,6 +2309,7 @@ export default function App() {
     incidents: <Incidents showToast={showToast} userId={userId} />,
     carnet: <CarnetEntretien showToast={showToast} userId={userId} />,
     documents: <Documents showToast={showToast} userId={userId} />,
+    ...(role === "admin" ? { equipe: <Equipe showToast={showToast} /> } : {}),
   };
 
   const nav = [
@@ -1926,9 +2323,8 @@ export default function App() {
     { id: "incidents", icon: "⚠️", label: "Incidents" },
     { id: "carnet", icon: "🗒️", label: "Carnet d'entretien" },
     { id: "documents", icon: "📁", label: "Documents" },
+    ...(role === "admin" ? [{ id: "equipe", icon: "👨‍💼", label: "Équipe" }] : []),
   ];
-
-  const initiales = session.user.email.slice(0, 2).toUpperCase();
 
   return (
     <>
@@ -1940,16 +2336,9 @@ export default function App() {
             <div className="nav-label">Navigation</div>
             {nav.map(item => <div key={item.id} className={`nav-item ${page === item.id ? "active" : ""}`} onClick={() => setPage(item.id)}><span>{item.icon}</span>{item.label}</div>)}
           </nav>
-          <div className="sidebar-user">
-            <div className="avatar">{initiales}</div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div className="user-name" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{session.user.email}</div>
-              <div className="user-role">Administrateur</div>
-            </div>
-            <button onClick={() => supabase.auth.signOut()} title="Déconnexion" style={{ background: "none", border: "none", color: "var(--gris)", cursor: "pointer", fontSize: 18, padding: "4px", flexShrink: 0 }}>⏻</button>
-          </div>
+          {sidebarUser}
         </aside>
-        <main className="main">{pages[page]}</main>
+        <main className="main">{pages[page] || pages.dashboard}</main>
         {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
       </div>
     </>
