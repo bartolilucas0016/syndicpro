@@ -100,6 +100,21 @@ const styles = `
   .toast { position: fixed; bottom: 24px; right: 24px; z-index: 9999; background: var(--bleu-profond); border: 1px solid var(--bleu-moyen); border-radius: 10px; padding: 14px 18px; font-size: 13px; display: flex; align-items: center; gap: 10px; box-shadow: 0 8px 30px rgba(0,0,0,0.4); }
   .toast-success { border-left: 3px solid var(--vert); }
   .toast-error { border-left: 3px solid var(--rouge); }
+  .notif-trigger { position: relative; display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 8px; cursor: pointer; color: var(--gris); font-size: 13px; font-weight: 500; transition: all 0.2s; margin: 0 10px 4px; border: none; background: none; width: calc(100% - 20px); font-family: 'DM Sans', sans-serif; }
+  .notif-trigger:hover { background: var(--bleu-moyen); color: var(--blanc); }
+  .notif-badge { position: absolute; top: 4px; left: 22px; background: var(--rouge); color: white; font-size: 9px; font-weight: 700; min-width: 15px; height: 15px; border-radius: 8px; display: flex; align-items: center; justify-content: center; padding: 0 3px; }
+  .notif-panel { position: fixed; top: 0; left: 240px; width: 320px; height: 100vh; background: var(--bleu-profond); border-right: 1px solid var(--bleu-moyen); box-shadow: 4px 0 24px rgba(0,0,0,0.3); z-index: 200; display: flex; flex-direction: column; }
+  .notif-panel-header { display: flex; justify-content: space-between; align-items: center; padding: 20px 16px 14px; border-bottom: 1px solid var(--bleu-moyen); flex-shrink: 0; }
+  .notif-panel-title { font-size: 14px; font-weight: 600; }
+  .notif-list { flex: 1; overflow-y: auto; }
+  .notif-item { padding: 14px 16px; border-bottom: 1px solid rgba(30,58,95,0.4); cursor: pointer; transition: background 0.15s; display: flex; gap: 10px; }
+  .notif-item:hover { background: var(--bleu-moyen); }
+  .notif-item.non-lue { background: rgba(201,168,76,0.06); }
+  .notif-icon { font-size: 18px; flex-shrink: 0; margin-top: 1px; }
+  .notif-titre { font-size: 13px; font-weight: 600; margin-bottom: 3px; }
+  .notif-msg { font-size: 12px; color: var(--gris); line-height: 1.4; }
+  .notif-date { font-size: 11px; color: var(--gris); margin-top: 4px; }
+  .notif-empty { padding: 40px 16px; text-align: center; color: var(--gris); font-size: 13px; }
 `;
 
 function Toast({ message, type, onClose }) {
@@ -135,7 +150,22 @@ function Badge({ statut }) {
   return <span className={`badge ${cls}`}>{label}</span>;
 }
 
-function Dashboard() {
+function tempsRel(date) {
+  const diff = Math.floor((Date.now() - new Date(date)) / 1000);
+  if (diff < 60) return "à l'instant";
+  if (diff < 3600) return `il y a ${Math.floor(diff / 60)} min`;
+  if (diff < 86400) return `il y a ${Math.floor(diff / 3600)}h`;
+  const j = Math.floor(diff / 86400);
+  return j < 30 ? `il y a ${j} jour${j > 1 ? "s" : ""}` : new Date(date).toLocaleDateString("fr-FR");
+}
+
+async function creerNotification(userId, type, titre, message) {
+  await supabase.from("notifications").insert([{ user_id: userId, type, titre, message }]);
+}
+
+const NOTIF_ICONS = { impaye: "⚠️", urgent: "🚨", ag_rappel: "📋", paiement_recu: "💳", relance: "📧", ag_planifiee: "📋", document: "📄" };
+
+function Dashboard({ residencesAutorisees, profil }) {
   const [stats, setStats] = useState({ residences: 0, coproprietaires: 0, impayes: 0, travaux: 0 });
   const [paiements, setPaiements] = useState([]);
   const [travaux, setTravaux] = useState([]);
@@ -143,17 +173,38 @@ function Dashboard() {
 
   useEffect(() => {
     async function load() {
-      const [r, c, p, t, dp] = await Promise.all([
-        supabase.from("residences").select("id", { count: "exact" }),
-        supabase.from("coproprietaires").select("id", { count: "exact" }),
-        supabase.from("paiements").select("*").eq("statut", "impaye"),
-        supabase.from("travaux").select("*").order("created_at", { ascending: false }).limit(4),
-        supabase.from("paiements").select("*, coproprietaires(nom, prenom, lot), charges(titre)").order("created_at", { ascending: false }).limit(5),
-      ]);
+      const f = residencesAutorisees;
+      let qr = supabase.from("residences").select("id", { count: "exact" });
+      let qc = supabase.from("coproprietaires").select("id", { count: "exact" });
+      let qt = supabase.from("travaux").select("*").order("created_at", { ascending: false }).limit(4);
+      let qdp = supabase.from("paiements").select("*, coproprietaires(nom, prenom, lot), charges(titre)").order("created_at", { ascending: false }).limit(5);
+      let qp = supabase.from("paiements").select("*, charges!inner(residence_id)").eq("statut", "impaye");
+      if (f) {
+        qr = qr.in("id", f);
+        qc = qc.in("residence_id", f);
+        qt = qt.in("residence_id", f);
+        qp = qp.in("charges.residence_id", f);
+        qdp = qdp.not("charges", "is", null);
+      }
+      const [r, c, p, t, dp] = await Promise.all([qr, qc, qp, qt, qdp]);
       setStats({ residences: r.count || 0, coproprietaires: c.count || 0, impayes: p.data?.length || 0, travaux: t.data?.filter(x => x.statut === "en_cours").length || 0 });
       setPaiements(dp.data || []);
       setTravaux(t.data || []);
       setLoading(false);
+
+      // Vérif impayes +30j pour admin
+      if (profil?.role === "admin" && p.data?.length) {
+        const cutoff = new Date(Date.now() - 30 * 86400000).toISOString();
+        const oneDayAgo = new Date(Date.now() - 86400000).toISOString();
+        const { data: dejaNotif } = await supabase.from("notifications").select("id").eq("user_id", profil.id).eq("type", "impaye").gte("created_at", oneDayAgo).limit(1);
+        if (!dejaNotif?.length) {
+          const vieux = p.data.filter(pai => pai.created_at && new Date(pai.created_at) < new Date(cutoff));
+          for (const pai of vieux) {
+            const c = pai.coproprietaires;
+            if (c) await creerNotification(profil.id, "impaye", "Impayé critique", `${c.prenom} ${c.nom} (lot ${c.lot}) a un impayé de ${pai.montant}€ depuis +30 jours.`);
+          }
+        }
+      }
     }
     load();
   }, []);
@@ -189,7 +240,7 @@ function Dashboard() {
   );
 }
 
-function Residences({ showToast, userId }) {
+function Residences({ showToast, userId, residencesAutorisees }) {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
@@ -199,7 +250,9 @@ function Residences({ showToast, userId }) {
   const [recherche, setRecherche] = useState("");
 
   async function load() {
-    const { data: r } = await supabase.from("residences").select("*").order("nom");
+    let q = supabase.from("residences").select("*").order("nom");
+    if (residencesAutorisees) q = q.in("id", residencesAutorisees);
+    const { data: r } = await q;
     setData(r || []);
     setLoading(false);
   }
@@ -274,7 +327,7 @@ function Residences({ showToast, userId }) {
   );
 }
 
-function Coproprietaires({ showToast, userId }) {
+function Coproprietaires({ showToast, userId, residencesAutorisees }) {
   const [data, setData] = useState([]);
   const [residences, setResidences] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -324,7 +377,10 @@ function Coproprietaires({ showToast, userId }) {
   }
 
   async function load() {
-    const [c, r] = await Promise.all([supabase.from("coproprietaires").select("*, residences(nom)").order("nom"), supabase.from("residences").select("id, nom")]);
+    let qc = supabase.from("coproprietaires").select("*, residences(nom)").order("nom");
+    let qr = supabase.from("residences").select("id, nom");
+    if (residencesAutorisees) { qc = qc.in("residence_id", residencesAutorisees); qr = qr.in("id", residencesAutorisees); }
+    const [c, r] = await Promise.all([qc, qr]);
     setData(c.data || []); setResidences(r.data || []); setLoading(false);
   }
   useEffect(() => { load(); }, []);
@@ -448,7 +504,7 @@ function buildAppalDeFondsPDF(copro, charge, quotePart) {
   return doc;
 }
 
-function Charges({ showToast, userId }) {
+function Charges({ showToast, userId, residencesAutorisees, profil }) {
   const [charges, setCharges] = useState([]);
   const [paiements, setPaiements] = useState([]);
   const [copros, setCopros] = useState([]);
@@ -467,13 +523,31 @@ function Charges({ showToast, userId }) {
   const [filtreStatut, setFiltreStatut] = useState("");
 
   async function load() {
+    let qch = supabase.from("charges").select("*, residences(nom)").order("date_echeance", { ascending: false });
+    let qc = supabase.from("coproprietaires").select("id, nom, prenom, lot, email, tantièmes, residence_id");
+    let qr = supabase.from("residences").select("id, nom");
+    if (residencesAutorisees) { qch = qch.in("residence_id", residencesAutorisees); qc = qc.in("residence_id", residencesAutorisees); qr = qr.in("id", residencesAutorisees); }
     const [ch, p, c, r] = await Promise.all([
-      supabase.from("charges").select("*, residences(nom)").order("date_echeance", { ascending: false }),
+      qch,
       supabase.from("paiements").select("*, coproprietaires(nom, prenom, email, lot), charges(titre)").order("created_at", { ascending: false }),
-      supabase.from("coproprietaires").select("id, nom, prenom, lot, email, tantièmes, residence_id"),
-      supabase.from("residences").select("id, nom"),
+      qc,
+      qr,
     ]);
     setCharges(ch.data || []); setPaiements(p.data || []); setCopros(c.data || []); setResidences(r.data || []); setLoading(false);
+
+    // Vérif impayes +15j pour gestionnaire
+    if (profil?.role === "gestionnaire" && p.data?.length) {
+      const cutoff = new Date(Date.now() - 15 * 86400000).toISOString();
+      const oneDayAgo = new Date(Date.now() - 86400000).toISOString();
+      const { data: dejaNotif } = await supabase.from("notifications").select("id").eq("user_id", profil.id).eq("type", "impaye").gte("created_at", oneDayAgo).limit(1);
+      if (!dejaNotif?.length) {
+        const vieux = (p.data || []).filter(pai => (pai.statut === "impaye" || pai.statut === "en_attente") && pai.created_at && new Date(pai.created_at) < new Date(cutoff));
+        for (const pai of vieux) {
+          const cop = pai.coproprietaires;
+          if (cop) await creerNotification(profil.id, "impaye", "Paiement en retard", `${cop.prenom} ${cop.nom} (lot ${cop.lot}) a un impayé de ${pai.montant}€ depuis +15 jours.`);
+        }
+      }
+    }
   }
   useEffect(() => { load(); }, []);
 
@@ -518,8 +592,9 @@ function Charges({ showToast, userId }) {
     showToast(editingPaiement ? "Paiement mis à jour ✓" : "Paiement enregistré ✓", "success");
     closeModalPaiement(); load();
     if (!editingPaiement) {
+      const copro = copros.find(c => c.id === formPaiement.coproprietaire_id);
+      // Email reçu
       try {
-        const copro = copros.find(c => c.id === formPaiement.coproprietaire_id);
         if (copro?.email) {
           await fetch("/api/envoyer-email", {
             method: "POST",
@@ -528,6 +603,13 @@ function Charges({ showToast, userId }) {
           });
         }
       } catch (e) { console.error("Email non envoyé", e); }
+      // Notification in-app pour le copro si paiement confirmé
+      if (formPaiement.statut === "paye" && copro) {
+        try {
+          const { data: coproProfil } = await supabase.from("profiles").select("id").eq("copro_id", copro.id).single();
+          if (coproProfil) await creerNotification(coproProfil.id, "paiement_recu", "Paiement confirmé", `Votre paiement de ${formPaiement.montant}€ a bien été enregistré.`);
+        } catch (e) { console.error("Notif paiement:", e); }
+      }
     }
   }
 
@@ -721,8 +803,13 @@ function Charges({ showToast, userId }) {
                                               try {
                                                 const r = await fetch("/api/envoyer-email", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "relance", destinataire: copro.email, donnees: { nom: copro.nom, prenom: copro.prenom, lot: copro.lot, montant: paiement.montant } }) });
                                                 const j = await r.json();
-                                                if (!r.ok) showToast("Erreur : " + j.error, "error");
-                                                else showToast("Relance envoyée ✓", "success");
+                                                if (!r.ok) { showToast("Erreur : " + j.error, "error"); return; }
+                                                showToast("Relance envoyée ✓", "success");
+                                                // Notification in-app pour le copro
+                                                try {
+                                                  const { data: cp } = await supabase.from("profiles").select("id").eq("copro_id", copro.id).single();
+                                                  if (cp) await creerNotification(cp.id, "relance", "Avis de paiement", `Un paiement de ${paiement.montant}€ est en attente sur votre lot ${copro.lot}.`);
+                                                } catch (e) { console.error("Notif relance:", e); }
                                               } catch { showToast("Erreur d'envoi", "error"); }
                                             }}>📧</button>
                                           }
@@ -817,7 +904,7 @@ function Charges({ showToast, userId }) {
   );
 }
 
-function Travaux({ showToast, userId }) {
+function Travaux({ showToast, userId, residencesAutorisees, profil }) {
   const [data, setData] = useState([]);
   const [residences, setResidences] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -828,7 +915,10 @@ function Travaux({ showToast, userId }) {
   const [recherche, setRecherche] = useState("");
 
   async function load() {
-    const [t, r] = await Promise.all([supabase.from("travaux").select("*, residences(nom)").order("created_at", { ascending: false }), supabase.from("residences").select("id, nom")]);
+    let qt = supabase.from("travaux").select("*, residences(nom)").order("created_at", { ascending: false });
+    let qr = supabase.from("residences").select("id, nom");
+    if (residencesAutorisees) { qt = qt.in("residence_id", residencesAutorisees); qr = qr.in("id", residencesAutorisees); }
+    const [t, r] = await Promise.all([qt, qr]);
     setData(t.data || []); setResidences(r.data || []); setLoading(false);
   }
   useEffect(() => { load(); }, []);
@@ -848,6 +938,16 @@ function Travaux({ showToast, userId }) {
       : await supabase.from("travaux").insert([{ ...payload, user_id: userId }]);
     if (error) return showToast("Erreur : " + error.message, "error");
     showToast(editing ? "Travaux mis à jour ✓" : "Travaux ajoutés ✓", "success");
+    // Notification chantier urgent → admins
+    if (form.urgence) {
+      try {
+        const residence = residences.find(r => r.id === form.residence_id);
+        const { data: admins } = await supabase.from("profiles").select("id").eq("role", "admin");
+        for (const a of (admins || [])) {
+          await creerNotification(a.id, "urgent", "Chantier urgent", `${form.titre} — ${residence?.nom || "résidence inconnue"}.`);
+        }
+      } catch (e) { console.error("Notif urgent:", e); }
+    }
     closeModal(); load();
   }
 
@@ -914,7 +1014,7 @@ function Travaux({ showToast, userId }) {
   );
 }
 
-function Assemblees({ showToast, userId }) {
+function Assemblees({ showToast, userId, residencesAutorisees, profil }) {
   const [data, setData] = useState([]);
   const [residences, setResidences] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -925,8 +1025,25 @@ function Assemblees({ showToast, userId }) {
   const [recherche, setRecherche] = useState("");
 
   async function load() {
-    const [a, r] = await Promise.all([supabase.from("assemblees").select("*, residences(nom)").order("date_ag", { ascending: false }), supabase.from("residences").select("id, nom")]);
+    let qa = supabase.from("assemblees").select("*, residences(nom)").order("date_ag", { ascending: false });
+    let qr = supabase.from("residences").select("id, nom");
+    if (residencesAutorisees) { qa = qa.in("residence_id", residencesAutorisees); qr = qr.in("id", residencesAutorisees); }
+    const [a, r] = await Promise.all([qa, qr]);
     setData(a.data || []); setResidences(r.data || []); setLoading(false);
+
+    // Rappel AG < 7j pour gestionnaire
+    if (profil?.role === "gestionnaire" && a.data?.length) {
+      const oneDayAgo = new Date(Date.now() - 86400000).toISOString();
+      const { data: dejaNotif } = await supabase.from("notifications").select("id").eq("user_id", profil.id).eq("type", "ag_rappel").gte("created_at", oneDayAgo).limit(1);
+      if (!dejaNotif?.length) {
+        const dans7j = new Date(Date.now() + 7 * 86400000);
+        const prochaines = (a.data || []).filter(ag => ag.statut !== "tenue" && ag.date_ag && new Date(ag.date_ag) <= dans7j && new Date(ag.date_ag) > new Date());
+        for (const ag of prochaines) {
+          const jours = Math.ceil((new Date(ag.date_ag) - Date.now()) / 86400000);
+          await creerNotification(profil.id, "ag_rappel", "AG imminente", `L'AG "${ag.titre}" a lieu dans ${jours} jour${jours > 1 ? "s" : ""}.`);
+        }
+      }
+    }
   }
   useEffect(() => { load(); }, []);
 
@@ -944,6 +1061,20 @@ function Assemblees({ showToast, userId }) {
       : await supabase.from("assemblees").insert([{ ...form, user_id: userId }]);
     if (error) return showToast("Erreur : " + error.message, "error");
     showToast(editing ? "AG mise à jour ✓" : "AG planifiée ✓", "success");
+    // Notification copros si nouvelle AG
+    if (!editing && form.residence_id && form.date_ag) {
+      try {
+        const dateFormatee = new Date(form.date_ag).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
+        const { data: coprosRes } = await supabase.from("coproprietaires").select("id").eq("residence_id", form.residence_id);
+        const coproIds = (coprosRes || []).map(c => c.id);
+        if (coproIds.length) {
+          const { data: profiles } = await supabase.from("profiles").select("id").in("copro_id", coproIds);
+          for (const p of (profiles || [])) {
+            await creerNotification(p.id, "ag_planifiee", "Convocation assemblée générale", `Une AG est planifiée le ${dateFormatee} — ${form.lieu || "lieu à confirmer"}.`);
+          }
+        }
+      } catch (e) { console.error("Notif AG:", e); }
+    }
     closeModal(); load();
   }
 
@@ -1078,7 +1209,7 @@ function Assemblees({ showToast, userId }) {
   );
 }
 
-function Finance() {
+function Finance({ residencesAutorisees }) {
   const [paiements, setPaiements] = useState([]);
   const [charges, setCharges] = useState([]);
   const [paiementsResidence, setPaiementsResidence] = useState([]);
@@ -1093,12 +1224,17 @@ function Finance() {
     async function load() {
       const today = new Date().toISOString().split("T")[0];
       const plus90 = new Date(Date.now() + 90 * 86400000).toISOString().split("T")[0];
+      const f = residencesAutorisees;
+      let qc = supabase.from("charges").select("*");
+      let qr = supabase.from("residences").select("*");
+      let qca = supabase.from("charges").select("*, paiements(montant, statut)").gte("date_echeance", today).lte("date_echeance", plus90);
+      if (f) { qc = qc.in("residence_id", f); qr = qr.in("id", f); qca = qca.in("residence_id", f); }
       const [p, c, pr, r, ca, al] = await Promise.all([
         supabase.from("paiements").select("*, coproprietaires(nom, prenom, lot)"),
-        supabase.from("charges").select("*"),
+        qc,
         supabase.from("paiements").select("montant, statut, charges(residence_id, residences(nom))"),
-        supabase.from("residences").select("*"),
-        supabase.from("charges").select("*, paiements(montant, statut)").gte("date_echeance", today).lte("date_echeance", plus90),
+        qr,
+        qca,
         supabase.from("paiements").select("*, coproprietaires(nom, prenom, lot), charges(titre, date_echeance)").eq("statut", "impaye"),
       ]);
       setPaiements(p.data || []);
@@ -1336,7 +1472,7 @@ function Finance() {
   );
 }
 
-function Incidents({ showToast, userId }) {
+function Incidents({ showToast, userId, residencesAutorisees }) {
   const [data, setData] = useState([]);
   const [residences, setResidences] = useState([]);
   const [historique, setHistorique] = useState([]);
@@ -1349,10 +1485,10 @@ function Incidents({ showToast, userId }) {
   const [recherche, setRecherche] = useState("");
 
   async function load() {
-    const [inc, res] = await Promise.all([
-      supabase.from("incidents").select("*, residences(nom)").order("created_at", { ascending: false }),
-      supabase.from("residences").select("*"),
-    ]);
+    let qi = supabase.from("incidents").select("*, residences(nom)").order("created_at", { ascending: false });
+    let qr = supabase.from("residences").select("*");
+    if (residencesAutorisees) { qi = qi.in("residence_id", residencesAutorisees); qr = qr.in("id", residencesAutorisees); }
+    const [inc, res] = await Promise.all([qi, qr]);
     setData(inc.data || []);
     setResidences(res.data || []);
     setLoading(false);
@@ -1498,7 +1634,7 @@ function Incidents({ showToast, userId }) {
   );
 }
 
-function CarnetEntretien({ showToast, userId }) {
+function CarnetEntretien({ showToast, userId, residencesAutorisees }) {
   const [data, setData] = useState([]);
   const [residences, setResidences] = useState([]);
   const [interventions, setInterventions] = useState([]);
@@ -1525,10 +1661,10 @@ function CarnetEntretien({ showToast, userId }) {
   }
 
   async function load() {
-    const [e, r] = await Promise.all([
-      supabase.from("entretiens").select("*, residences(nom)").order("prochaine_echeance", { ascending: true }),
-      supabase.from("residences").select("*"),
-    ]);
+    let qe = supabase.from("entretiens").select("*, residences(nom)").order("prochaine_echeance", { ascending: true });
+    let qr = supabase.from("residences").select("*");
+    if (residencesAutorisees) { qe = qe.in("residence_id", residencesAutorisees); qr = qr.in("id", residencesAutorisees); }
+    const [e, r] = await Promise.all([qe, qr]);
     setData(e.data || []);
     setResidences(r.data || []);
     setLoading(false);
@@ -1681,7 +1817,7 @@ function CarnetEntretien({ showToast, userId }) {
   );
 }
 
-function Documents({ showToast, userId }) {
+function Documents({ showToast, userId, residencesAutorisees, profil }) {
   const [residences, setResidences] = useState([]);
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1701,10 +1837,10 @@ function Documents({ showToast, userId }) {
   ];
 
   async function load() {
-    const [r, d] = await Promise.all([
-      supabase.from("residences").select("id, nom"),
-      supabase.from("documents").select("*, residences(nom)").order("created_at", { ascending: false }),
-    ]);
+    let qr = supabase.from("residences").select("id, nom");
+    let qd = supabase.from("documents").select("*, residences(nom)").order("created_at", { ascending: false });
+    if (residencesAutorisees) { qr = qr.in("id", residencesAutorisees); qd = qd.in("residence_id", residencesAutorisees); }
+    const [r, d] = await Promise.all([qr, qd]);
     setResidences(r.data || []);
     setDocuments(d.data || []);
     setLoading(false);
@@ -1748,6 +1884,17 @@ function Documents({ showToast, userId }) {
     showToast(`${file.name} uploadé ✓`, "success");
     setUploading(false);
     load();
+    // Notification copros de la résidence
+    try {
+      const { data: coprosRes } = await supabase.from("coproprietaires").select("id").eq("residence_id", selectedResidence);
+      const coproIds = (coprosRes || []).map(c => c.id);
+      if (coproIds.length) {
+        const { data: profiles } = await supabase.from("profiles").select("id").in("copro_id", coproIds);
+        for (const p of (profiles || [])) {
+          await creerNotification(p.id, "document", "Nouveau document disponible", `Un document a été déposé : ${file.name}.`);
+        }
+      }
+    } catch (e) { console.error("Notif document:", e); }
   }
 
   async function handleDrop(e) {
@@ -2037,14 +2184,23 @@ function EspaceCopro({ profil, showToast }) {
 
 function Equipe({ showToast }) {
   const [profils, setProfils] = useState([]);
+  const [residences, setResidences] = useState([]);
+  const [assignations, setAssignations] = useState([]); // gestionnaire_residences rows
   const [loading, setLoading] = useState(true);
   const [modalInvite, setModalInvite] = useState(false);
+  const [modalAssign, setModalAssign] = useState(null); // gestionnaire profile
   const [formInvite, setFormInvite] = useState({ email: "", prenom: "", nom: "", role: "gestionnaire" });
   const [inviting, setInviting] = useState(false);
 
   async function load() {
-    const { data } = await supabase.from("profiles").select("*").order("role");
-    setProfils(data || []);
+    const [p, r, a] = await Promise.all([
+      supabase.from("profiles").select("*").order("role"),
+      supabase.from("residences").select("id, nom").order("nom"),
+      supabase.from("gestionnaire_residences").select("*"),
+    ]);
+    setProfils(p.data || []);
+    setResidences(r.data || []);
+    setAssignations(a.data || []);
     setLoading(false);
   }
 
@@ -2073,6 +2229,16 @@ function Equipe({ showToast }) {
     load();
   }
 
+  async function toggleResidence(gestionnaireId, residenceId, isAssigned) {
+    if (isAssigned) {
+      await supabase.from("gestionnaire_residences").delete().eq("gestionnaire_id", gestionnaireId).eq("residence_id", residenceId);
+    } else {
+      await supabase.from("gestionnaire_residences").insert([{ gestionnaire_id: gestionnaireId, residence_id: residenceId }]);
+    }
+    const { data } = await supabase.from("gestionnaire_residences").select("*");
+    setAssignations(data || []);
+  }
+
   const roleLabel = { admin: "Admin", gestionnaire: "Gestionnaire", coproprietaire: "Copropriétaire" };
   const roleBadge = { admin: "badge-red", gestionnaire: "badge-blue", coproprietaire: "badge-green" };
 
@@ -2088,24 +2254,38 @@ function Equipe({ showToast }) {
         {profils.length === 0 ? <div className="empty"><div className="empty-text">Aucun membre</div></div> : (
           <div className="table-wrap">
             <table>
-              <thead><tr><th>Nom</th><th>Rôle</th><th>Changer le rôle</th></tr></thead>
+              <thead><tr><th>Nom</th><th>Rôle</th><th>Changer le rôle</th><th>Résidences assignées</th></tr></thead>
               <tbody>
-                {profils.map(p => (
-                  <tr key={p.id}>
-                    <td>
-                      <div style={{ fontWeight: 600 }}>{p.prenom && p.nom ? `${p.prenom} ${p.nom}` : "—"}</div>
-                      <div style={{ fontSize: 11, color: "var(--gris)" }}>{p.id}</div>
-                    </td>
-                    <td><span className={`badge ${roleBadge[p.role] || "badge-gray"}`}>{roleLabel[p.role] || p.role}</span></td>
-                    <td>
-                      <select value={p.role} onChange={e => changerRole(p.id, e.target.value)} className="form-input" style={{ width: "auto", padding: "4px 8px", fontSize: 12 }}>
-                        <option value="admin">Admin</option>
-                        <option value="gestionnaire">Gestionnaire</option>
-                        <option value="coproprietaire">Copropriétaire</option>
-                      </select>
-                    </td>
-                  </tr>
-                ))}
+                {profils.map(p => {
+                  const resAssignees = assignations.filter(a => a.gestionnaire_id === p.id).map(a => residences.find(r => r.id === a.residence_id)?.nom).filter(Boolean);
+                  return (
+                    <tr key={p.id}>
+                      <td>
+                        <div style={{ fontWeight: 600 }}>{p.prenom && p.nom ? `${p.prenom} ${p.nom}` : "—"}</div>
+                        <div style={{ fontSize: 11, color: "var(--gris)" }}>{p.id.slice(0, 8)}…</div>
+                      </td>
+                      <td><span className={`badge ${roleBadge[p.role] || "badge-gray"}`}>{roleLabel[p.role] || p.role}</span></td>
+                      <td>
+                        <select value={p.role} onChange={e => changerRole(p.id, e.target.value)} className="form-input" style={{ width: "auto", padding: "4px 8px", fontSize: 12 }}>
+                          <option value="admin">Admin</option>
+                          <option value="gestionnaire">Gestionnaire</option>
+                          <option value="coproprietaire">Copropriétaire</option>
+                        </select>
+                      </td>
+                      <td>
+                        {p.role === "gestionnaire" ? (
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                            {resAssignees.length > 0
+                              ? resAssignees.map(nom => <span key={nom} className="badge badge-blue" style={{ fontSize: 10 }}>{nom}</span>)
+                              : <span style={{ color: "var(--gris)", fontSize: 12 }}>Aucune</span>
+                            }
+                            <button className="btn btn-secondary btn-sm" onClick={() => setModalAssign(p)}>✏️</button>
+                          </div>
+                        ) : <span style={{ color: "var(--gris)", fontSize: 12 }}>—</span>}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -2139,6 +2319,23 @@ function Equipe({ showToast }) {
             <button className="btn btn-secondary" onClick={() => setModalInvite(false)}>Annuler</button>
             <button className="btn btn-primary" onClick={inviter} disabled={inviting}>{inviting ? "Envoi…" : "Envoyer l'invitation"}</button>
           </div>
+        </Modal>
+      )}
+      {modalAssign && (
+        <Modal title={`Résidences — ${modalAssign.prenom || ""} ${modalAssign.nom || ""}`} onClose={() => setModalAssign(null)}>
+          <p style={{ color: "var(--gris)", fontSize: 13, marginBottom: 16 }}>Cochez les résidences que ce gestionnaire peut gérer.</p>
+          {residences.map(r => {
+            const assigned = assignations.some(a => a.gestionnaire_id === modalAssign.id && a.residence_id === r.id);
+            return (
+              <div key={r.id} className="list-item" style={{ cursor: "pointer" }} onClick={() => toggleResidence(modalAssign.id, r.id, assigned)}>
+                <div style={{ width: 20, height: 20, borderRadius: 4, border: `2px solid ${assigned ? "var(--or)" : "var(--bleu-moyen)"}`, background: assigned ? "var(--or)" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, color: "var(--bleu-nuit)", flexShrink: 0 }}>
+                  {assigned ? "✓" : ""}
+                </div>
+                <div className="list-content"><div className="list-title">{r.nom}</div></div>
+              </div>
+            );
+          })}
+          <div className="modal-actions"><button className="btn btn-primary" onClick={() => setModalAssign(null)}>Fermer</button></div>
         </Modal>
       )}
     </div>
@@ -2228,13 +2425,40 @@ function Login() {
 export default function App() {
   const [session, setSession] = useState(undefined);
   const [profil, setProfil] = useState(null);
+  const [residencesAutorisees, setResidencesAutorisees] = useState(undefined);
   const [page, setPage] = useState("dashboard");
   const [toast, setToast] = useState(null);
+  const [notifs, setNotifs] = useState([]);
+  const [notifOpen, setNotifOpen] = useState(false);
   function showToast(message, type = "success") { setToast({ message, type }); }
+
+  async function loadNotifs(uid) {
+    const { data } = await supabase.from("notifications").select("*").eq("user_id", uid).order("created_at", { ascending: false }).limit(20);
+    setNotifs(data || []);
+  }
+
+  async function marquerLu(id) {
+    await supabase.from("notifications").update({ lu: true }).eq("id", id);
+    setNotifs(prev => prev.map(n => n.id === id ? { ...n, lu: true } : n));
+  }
+
+  async function toutMarquerLu() {
+    const ids = notifs.filter(n => !n.lu).map(n => n.id);
+    if (!ids.length) return;
+    await supabase.from("notifications").update({ lu: true }).in("id", ids);
+    setNotifs(prev => prev.map(n => ({ ...n, lu: true })));
+  }
 
   async function loadProfil(userId) {
     const { data } = await supabase.from("profiles").select("*").eq("id", userId).single();
-    setProfil(data || { role: "admin" });
+    const p = data || { role: "admin" };
+    setProfil(p);
+    if (p.role === "gestionnaire") {
+      const { data: gr } = await supabase.from("gestionnaire_residences").select("residence_id").eq("gestionnaire_id", userId);
+      setResidencesAutorisees((gr || []).map(r => r.residence_id));
+    } else {
+      setResidencesAutorisees(null);
+    }
   }
 
   useEffect(() => {
@@ -2245,12 +2469,32 @@ export default function App() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
       if (session) loadProfil(session.user.id);
-      else setProfil(null);
+      else { setProfil(null); setResidencesAutorisees(null); }
     });
     return () => subscription.unsubscribe();
   }, []);
 
-  if (session === undefined || (session && !profil)) return (
+  useEffect(() => {
+    if (!session?.user?.id) return;
+    loadNotifs(session.user.id);
+    const channel = supabase.channel("notifs_" + session.user.id)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "notifications", filter: `user_id=eq.${session.user.id}` }, payload => {
+        setNotifs(prev => [payload.new, ...prev]);
+      })
+      .subscribe();
+    return () => supabase.removeChannel(channel);
+  }, [session?.user?.id]);
+
+  useEffect(() => {
+    if (!notifOpen) return;
+    function handleClick(e) {
+      if (!e.target.closest(".notif-panel") && !e.target.closest(".notif-trigger")) setNotifOpen(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [notifOpen]);
+
+  if (session === undefined || (session && (!profil || residencesAutorisees === undefined))) return (
     <>
       <style>{styles}</style>
       <div style={{ position: "fixed", inset: 0, background: "var(--bleu-nuit)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--gris)", fontSize: 14 }}>
@@ -2276,6 +2520,39 @@ export default function App() {
     </div>
   );
 
+  const nonLus = notifs.filter(n => !n.lu).length;
+
+  const notifBell = (
+    <button className="notif-trigger" onClick={() => setNotifOpen(o => !o)}>
+      <span>🔔</span><span>Notifications</span>
+      {nonLus > 0 && <span className="notif-badge">{nonLus > 99 ? "99+" : nonLus}</span>}
+    </button>
+  );
+
+  const notifPanel = notifOpen && (
+    <div className="notif-panel">
+      <div className="notif-panel-header">
+        <span className="notif-panel-title">🔔 Notifications</span>
+        <button onClick={toutMarquerLu} style={{ background: "none", border: "none", color: "var(--or)", fontSize: 12, cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }}>Tout marquer comme lu</button>
+      </div>
+      <div className="notif-list">
+        {notifs.length === 0
+          ? <div className="notif-empty">Aucune notification</div>
+          : notifs.map(n => (
+            <div key={n.id} className={`notif-item${n.lu ? "" : " non-lue"}`} onClick={() => marquerLu(n.id)}>
+              <div className="notif-icon">{NOTIF_ICONS[n.type] || "🔔"}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="notif-titre">{n.titre}</div>
+                <div className="notif-msg">{n.message}</div>
+                <div className="notif-date">{tempsRel(n.created_at)}</div>
+              </div>
+            </div>
+          ))
+        }
+      </div>
+    </div>
+  );
+
   // — Espace copropriétaire —
   if (role === "coproprietaire") {
     return (
@@ -2288,9 +2565,11 @@ export default function App() {
               <div className="nav-label">Mon espace</div>
               <div className="nav-item active"><span>🏠</span>Tableau de bord</div>
             </nav>
+            {notifBell}
             {sidebarUser}
           </aside>
           <main className="main"><EspaceCopro profil={profil} showToast={showToast} /></main>
+          {notifPanel}
           {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
         </div>
       </>
@@ -2298,17 +2577,18 @@ export default function App() {
   }
 
   // — Admin & Gestionnaire —
+  const ra = residencesAutorisees;
   const pages = {
-    dashboard: <Dashboard />,
-    residences: <Residences showToast={showToast} userId={userId} />,
-    coproprietaires: <Coproprietaires showToast={showToast} userId={userId} />,
-    charges: <Charges showToast={showToast} userId={userId} />,
-    travaux: <Travaux showToast={showToast} userId={userId} />,
-    assemblees: <Assemblees showToast={showToast} userId={userId} />,
-    finance: <Finance />,
-    incidents: <Incidents showToast={showToast} userId={userId} />,
-    carnet: <CarnetEntretien showToast={showToast} userId={userId} />,
-    documents: <Documents showToast={showToast} userId={userId} />,
+    dashboard: <Dashboard residencesAutorisees={ra} profil={profil} />,
+    residences: <Residences showToast={showToast} userId={userId} residencesAutorisees={ra} />,
+    coproprietaires: <Coproprietaires showToast={showToast} userId={userId} residencesAutorisees={ra} />,
+    charges: <Charges showToast={showToast} userId={userId} residencesAutorisees={ra} profil={profil} />,
+    travaux: <Travaux showToast={showToast} userId={userId} residencesAutorisees={ra} profil={profil} />,
+    assemblees: <Assemblees showToast={showToast} userId={userId} residencesAutorisees={ra} profil={profil} />,
+    finance: <Finance residencesAutorisees={ra} />,
+    incidents: <Incidents showToast={showToast} userId={userId} residencesAutorisees={ra} />,
+    carnet: <CarnetEntretien showToast={showToast} userId={userId} residencesAutorisees={ra} />,
+    documents: <Documents showToast={showToast} userId={userId} residencesAutorisees={ra} profil={profil} />,
     ...(role === "admin" ? { equipe: <Equipe showToast={showToast} /> } : {}),
   };
 
@@ -2336,9 +2616,11 @@ export default function App() {
             <div className="nav-label">Navigation</div>
             {nav.map(item => <div key={item.id} className={`nav-item ${page === item.id ? "active" : ""}`} onClick={() => setPage(item.id)}><span>{item.icon}</span>{item.label}</div>)}
           </nav>
+          {notifBell}
           {sidebarUser}
         </aside>
         <main className="main">{pages[page] || pages.dashboard}</main>
+        {notifPanel}
         {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
       </div>
     </>
