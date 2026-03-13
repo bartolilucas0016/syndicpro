@@ -9,7 +9,7 @@ function esc(str) {
 }
 
 function validate(donnees, fields) {
-  const missing = fields.filter(f => !donnees?.[f]);
+  const missing = fields.filter(f => donnees?.[f] == null || donnees[f] === "");
   if (missing.length > 0) throw new Error(`Champs manquants : ${missing.join(", ")}`);
 }
 
@@ -109,6 +109,8 @@ export default async function handler(req, res) {
 
   const { type, destinataire, donnees } = req.body || {};
 
+  console.log("[envoyer-email] type:", type, "| to:", destinataire, "| donnees:", JSON.stringify(donnees));
+
   if (!type) return res.status(400).json({ error: "Type manquant" });
   if (!destinataire) return res.status(400).json({ error: "Destinataire manquant" });
   if (!templates[type]) return res.status(400).json({ error: `Type inconnu : ${type}` });
@@ -117,9 +119,11 @@ export default async function handler(req, res) {
   try {
     emailContent = templates[type](donnees || {});
   } catch (err) {
+    console.error("[envoyer-email] Validation error:", err.message);
     return res.status(400).json({ error: err.message });
   }
 
+  console.log("[envoyer-email] Sending from:", FROM);
   const { data, error } = await resend.emails.send({
     from: FROM,
     to: destinataire,
@@ -131,5 +135,6 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: error.message || "Erreur Resend", details: error });
   }
 
+  console.log("[envoyer-email] Sent OK, id:", data?.id);
   return res.status(200).json({ success: true, id: data?.id });
 }
