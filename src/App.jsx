@@ -100,8 +100,8 @@ const styles = `
   .toast { position: fixed; bottom: 24px; right: 24px; z-index: 9999; background: var(--bleu-profond); border: 1px solid var(--bleu-moyen); border-radius: 10px; padding: 14px 18px; font-size: 13px; display: flex; align-items: center; gap: 10px; box-shadow: 0 8px 30px rgba(0,0,0,0.4); }
   .toast-success { border-left: 3px solid var(--vert); }
   .toast-error { border-left: 3px solid var(--rouge); }
-  .notif-trigger { position: relative; display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 8px; cursor: pointer; color: var(--gris); font-size: 13px; font-weight: 500; transition: all 0.2s; margin: 0 10px 4px; border: none; background: none; width: calc(100% - 20px); font-family: 'DM Sans', sans-serif; }
-  .notif-trigger:hover { background: var(--bleu-moyen); color: var(--blanc); }
+  .notif-trigger { position: relative; display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 8px; cursor: pointer; color: var(--blanc); font-size: 13px; font-weight: 500; transition: all 0.2s; margin: 8px 10px 4px; border: 1px solid var(--bleu-moyen); background: var(--bleu-nuit); width: calc(100% - 20px); font-family: 'DM Sans', sans-serif; }
+  .notif-trigger:hover { background: var(--bleu-moyen); border-color: var(--or); color: var(--or-clair); }
   .notif-badge { position: absolute; top: 4px; left: 22px; background: var(--rouge); color: white; font-size: 9px; font-weight: 700; min-width: 15px; height: 15px; border-radius: 8px; display: flex; align-items: center; justify-content: center; padding: 0 3px; }
   .notif-panel { position: fixed; bottom: 60px; left: 256px; width: 320px; max-height: 480px; background: var(--bleu-profond); border: 1px solid var(--bleu-moyen); border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.45); z-index: 200; display: flex; flex-direction: column; overflow: hidden; }
   .notif-panel-header { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px 12px; border-bottom: 1px solid var(--bleu-moyen); flex-shrink: 0; }
